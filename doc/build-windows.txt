@@ -8,11 +8,23 @@ Recommended: use the automated script from the repository root:
 
     ./compile-windows.sh
 
-The script checks the host OS, installs missing packages, downloads and
-builds OpenSSL / Berkeley DB / Boost / zlib / miniupnpc / (optional) Qt,
-verifies library and header paths, then compiles both executables into:
+The script targets Ubuntu 22.04 and will:
 
-    release/windows/
+  1. Install host packages (mingw-w64, build tools, Qt host libs)
+  2. Install MXE Qt5 for mingw (GUI), or build qtbase from source as fallback
+  3. Download/build OpenSSL, Berkeley DB, Boost, zlib, miniupnpc
+  4. Verify dependency headers/libraries
+  5. Compile BOTH Windows wallets into release/windows/:
+       RNRCd.exe      (CLI)
+       RNRC-qt.exe    (GUI)
+
+Optional environment variables:
+
+  BUILD_GUI=0              # CLI only
+  TARGET_ARCH=i686         # 32-bit Windows
+  QT_MINGW_QMAKE=/path     # force a specific mingw qmake
+  JOBS=4                   # parallel build jobs
+  DEPS_DIR=/path/to/deps   # override depends prefix
 
 
 Manual step-by-step (equivalent to the script)
