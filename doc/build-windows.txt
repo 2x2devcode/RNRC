@@ -210,8 +210,12 @@ Verification checklist
 
 If the GUI `make` fails, check `release/windows/logs/compile-windows-latest.errors.txt`
 first, then `gui-latest.log` / `compile-windows-latest.log`. A copy is also kept
-at `build-win-qt/build.log`. A lone `-Wformat-extra-args` warning on `main.h`
-is not fatal by itself after the MinGW PRI macro fix in util.h.
+at `build-win-qt/build.log`.
+
+Common MinGW + C++17 failure: `reference to 'byte' is ambiguous` in
+`rpcndr.h` / `objidl.h` while compiling `guiutil.cpp`. That was caused by
+`using namespace std;` in zerocoin headers conflicting with Windows `byte`
+vs `std::byte`. Fixed by removing those header using-directives.
 
 32-bit (i686) builds
 --------------------

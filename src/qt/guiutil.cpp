@@ -1,9 +1,6 @@
 #include "guiutil.h"
 #include "bitcoinaddressvalidator.h"
-#include "walletmodel.h"
 #include "bitcoinunits.h"
-#include "util.h"
-#include "init.h"
 
 #include <QString>
 #include <QDateTime>
@@ -35,10 +32,17 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+// Include Windows headers BEFORE util.h/init.h. Those pull main.h → zerocoin
+// headers; any residual `using namespace std` would make C++17 std::byte
+// conflict with rpcndr.h's typedef byte.
 #include "shlwapi.h"
 #include "shlobj.h"
 #include "shellapi.h"
 #endif
+
+#include "walletmodel.h"
+#include "util.h"
+#include "init.h"
 
 namespace GUIUtil {
 
