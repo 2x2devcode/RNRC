@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # compile-windows.sh — Cross-compile RNRC Windows CLI + GUI from Ubuntu 22.04
-# Produces: release/windows/RNRCd.exe and (when Qt is available) RNRC-qt.exe
+# Installs host + Qt (mingw) dependencies, then builds BOTH:
+#   release/windows/RNRCd.exe
+#   release/windows/RNRC-qt.exe
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,6 +16,8 @@ JOBS="${JOBS:-$(nproc 2>/dev/null || echo 2)}"
 RELEASE_DIR="$ROOT/release/windows"
 BUILD_GUI="${BUILD_GUI:-1}"
 USE_UPNP="${USE_UPNP:--}"
+MXE_PREFIX="${MXE_PREFIX:-/usr/lib/mxe}"
+QT_VER="${QT_VER:-5.15.2}"
 
 OPENSSL_VER="${OPENSSL_VER:-3.0.13}"
 BOOST_VER="${BOOST_VER:-1.82.0}"
@@ -21,6 +25,15 @@ BOOST_VER_U="${BOOST_VER//./_}"
 BDB_VER="4.8.30"
 MINIUPNPC_VER="${MINIUPNPC_VER:-2.2.6}"
 ZLIB_VER="${ZLIB_VER:-1.3.1}"
+
+# MXE target triple used by apt packages / qmake wrappers
+if [[ "$TARGET_ARCH" == "x86_64" ]]; then
+    MXE_TARGET="x86_64-w64-mingw32.static"
+    MXE_APT_ARCH="x86-64"
+else
+    MXE_TARGET="i686-w64-mingw32.static"
+    MXE_APT_ARCH="i686"
+fi
 
 log()  { printf '\n==> %s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
@@ -46,7 +59,7 @@ check_ubuntu() {
                     ;;
             esac
         else
-            warn "Non-Ubuntu host; mingw package names may differ."
+            warn "Non-Ubuntu host; package names may differ."
         fi
     fi
 }
@@ -65,7 +78,7 @@ apt_install() {
         sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
     else
-        log "All required apt packages already installed."
+        log "Required apt packages already present (${#pkgs[@]} checked)."
     fi
 }
 
@@ -103,6 +116,35 @@ verify_file() {
     [[ -e "$f" ]] || die "$msg (missing: $f)"
 }
 
+install_host_packages() {
+    local mingw_pkg_arch="$TARGET_ARCH"
+    [[ "$TARGET_ARCH" == "x86_64" ]] && mingw_pkg_arch="x86-64"
+
+    local pkgs=(
+        # CLI + general build
+        build-essential curl wget git ca-certificates
+        autoconf automake libtool pkg-config cmake unzip zip
+        python3 python3-pip
+        mingw-w64
+        "g++-mingw-w64-${mingw_pkg_arch}"
+        "gcc-mingw-w64-${mingw_pkg_arch}"
+        # GUI / Qt cross-build host tools
+        gperf bison flex
+        libgl1-mesa-dev libglu1-mesa-dev
+        libfontconfig1-dev libfreetype6-dev
+        libx11-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev
+        libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+        software-properties-common lsb-release gnupg apt-transport-https
+    )
+    if need_cmd apt-get; then
+        apt_install "${pkgs[@]}"
+    else
+        die "apt-get not found; this script targets Ubuntu 22.04."
+    fi
+}
+
+# ---------- dependency builds (CLI) ----------
+
 build_zlib() {
     local marker="$DEPS/.zlib.ok"
     [[ -f "$marker" ]] && { log "zlib already built"; return 0; }
@@ -137,7 +179,6 @@ build_openssl() {
         --prefix="$DEPS" --libdir=lib --openssldir="$DEPS/ssl"
     make -j"$JOBS"
     make install_sw
-    # Some OpenSSL builds still drop libs in lib64 — normalize to lib/
     if [[ -f "$DEPS/lib64/libssl.a" && ! -f "$DEPS/lib/libssl.a" ]]; then
         mkdir -p "$DEPS/lib"
         cp -a "$DEPS/lib64/"*.a "$DEPS/lib/" 2>/dev/null || true
@@ -161,7 +202,6 @@ build_bdb() {
     rm -rf "db-${BDB_VER}.NC"
     tar xzf "$tarball"
     cd "db-${BDB_VER}.NC"
-    # Atomic typedef patch for modern mingw / GCC
     if [[ -f src/dbinc/atomic.h ]]; then
         sed -i 's/__atomic_compare_exchange/__atomic_compare_exchange_db/g' src/dbinc/atomic.h || true
         sed -i 's/atomic_init/atomic_init_db/g' src/dbinc/atomic.h src/mp/mp_mvcc.c src/mp/mp_fget.c src/mutex/mut_method.c src/mutex/mut_tas.c 2>/dev/null || true
@@ -175,14 +215,12 @@ build_bdb() {
         RANLIB="${TARGET}-ranlib" AR="${TARGET}-ar" \
         CFLAGS="-D_GNU_SOURCE" CXXFLAGS="-std=c++17"
     make -j"$JOBS" libdb_cxx.a libdb.a
-    # install headers + libs manually if make install fails on docs
     make install_lib install_include || {
         mkdir -p "$DEPS/lib" "$DEPS/include"
         cp .libs/libdb*.a "$DEPS/lib/" 2>/dev/null || cp libdb*.a "$DEPS/lib/"
         cp ../src/db.h ../src/db_cxx.h "$DEPS/include/"
         cp -a ../src/dbinc "$DEPS/include/" 2>/dev/null || true
     }
-    # Ensure libdb_cxx.a is present
     if [[ ! -f "$DEPS/lib/libdb_cxx.a" ]]; then
         find . -name 'libdb_cxx*.a' -exec cp {} "$DEPS/lib/libdb_cxx.a" \;
         find . -name 'libdb-*.a' -o -name 'libdb.a' | head -1 | while read -r f; do cp "$f" "$DEPS/lib/libdb.a"; done
@@ -233,7 +271,6 @@ build_miniupnpc() {
         || download "https://github.com/miniupnp/miniupnp/archive/refs/tags/miniupnpc_${MINIUPNPC_VER//./_}.tar.gz" "miniupnpc-${MINIUPNPC_VER}.tar.gz"
     rm -rf "miniupnpc-${MINIUPNPC_VER}"
     tar xzf "miniupnpc-${MINIUPNPC_VER}.tar.gz"
-    # tarball layout may be miniupnpc-VER or miniupnp-.../miniupnpc
     local dir
     dir="$(find . -maxdepth 2 -type d -name 'miniupnpc*' | head -1)"
     [[ -n "$dir" ]] || dir="$(find . -maxdepth 3 -type d -name 'miniupnpc' | head -1)"
@@ -247,7 +284,6 @@ build_miniupnpc() {
     fi
     mkdir -p "$DEPS/include/miniupnpc" "$DEPS/lib"
     find . -name 'libminiupnpc.a' -exec cp {} "$DEPS/lib/" \;
-    # Prefer packaged include/ layout (miniupnpc 2.x)
     if [[ -d include ]]; then
         cp -a include/*.h "$DEPS/include/miniupnpc/" 2>/dev/null || true
         cp -a include/miniupnpc/*.h "$DEPS/include/miniupnpc/" 2>/dev/null || true
@@ -260,7 +296,6 @@ build_miniupnpc() {
 
 check_deps_links() {
     log "Verifying dependency headers and libraries under $DEPS"
-    # Normalize OpenSSL lib64 -> lib if needed
     if [[ -f "$DEPS/lib64/libssl.a" && ! -f "$DEPS/lib/libssl.a" ]]; then
         mkdir -p "$DEPS/lib"
         cp -a "$DEPS/lib64/"*.a "$DEPS/lib/" 2>/dev/null || true
@@ -269,7 +304,6 @@ check_deps_links() {
     verify_file "$DEPS/lib/libssl.a" "OpenSSL libssl"
     verify_file "$DEPS/lib/libcrypto.a" "OpenSSL libcrypto"
     verify_file "$DEPS/include/db_cxx.h" "Berkeley DB C++ header"
-    # libdb_cxx may be versioned
     if [[ ! -f "$DEPS/lib/libdb_cxx.a" ]]; then
         local f
         f="$(find "$DEPS/lib" -name 'libdb_cxx*.a' | head -1 || true)"
@@ -281,26 +315,194 @@ check_deps_links() {
     boost_sys="$(find "$DEPS/lib" -name 'libboost_system*.a' | head -1 || true)"
     [[ -n "$boost_sys" ]] || die "Boost system library not found in $DEPS/lib"
     log "Found Boost: $(basename "$boost_sys")"
-    # Detect BOOST_LIB_SUFFIX from filename: libboost_system-mt-s-x64.a -> -mt-s-x64
     local base
     base="$(basename "$boost_sys" .a)"
     export BOOST_LIB_SUFFIX="${base#libboost_system}"
     log "Using BOOST_LIB_SUFFIX=${BOOST_LIB_SUFFIX}"
-    # Detect thread library name (boost_thread vs boost_thread_win32)
     if [[ -f "$DEPS/lib/libboost_thread_win32${BOOST_LIB_SUFFIX}.a" ]]; then
         export BOOST_THREAD_LIB=boost_thread_win32
+        export BOOST_THREAD_LIB_SUFFIX="_win32${BOOST_LIB_SUFFIX}"
     elif [[ -f "$DEPS/lib/libboost_thread${BOOST_LIB_SUFFIX}.a" ]]; then
         export BOOST_THREAD_LIB=boost_thread
+        export BOOST_THREAD_LIB_SUFFIX="${BOOST_LIB_SUFFIX}"
     else
         die "Boost thread library not found (suffix ${BOOST_LIB_SUFFIX})"
     fi
-    log "Using BOOST_THREAD_LIB=${BOOST_THREAD_LIB}"
+    log "Using BOOST_THREAD_LIB=${BOOST_THREAD_LIB} BOOST_THREAD_LIB_SUFFIX=${BOOST_THREAD_LIB_SUFFIX}"
 }
+
+# ---------- Qt for Windows GUI ----------
+
+setup_mxe_apt() {
+    if ! need_cmd apt-get; then
+        return 1
+    fi
+    # shellcheck source=/dev/null
+    . /etc/os-release
+    local codename="${VERSION_CODENAME:-jammy}"
+    # MXE may not publish every Ubuntu codename; fall back to jammy/focal
+    if ! curl -fsI "https://pkg.mxe.cc/repos/apt/dists/${codename}/" >/dev/null 2>&1; then
+        if curl -fsI "https://pkg.mxe.cc/repos/apt/dists/jammy/" >/dev/null 2>&1; then
+            codename=jammy
+        else
+            codename=focal
+        fi
+        warn "MXE apt dist for this Ubuntu not found; using '${codename}'."
+    fi
+
+    log "Configuring MXE apt repository (dist=${codename})"
+    sudo apt-get install -y -qq software-properties-common lsb-release gnupg apt-transport-https ca-certificates >/dev/null
+
+    # Prefer modern signed-by keyring; fall back to apt-key
+    local keyring=/usr/share/keyrings/mxe-archive-keyring.gpg
+    if [[ ! -f "$keyring" ]]; then
+        if need_cmd gpg; then
+            curl -fsSL "https://pkg.mxe.cc/repos/apt/mxe.key" \
+                | sudo gpg --dearmor -o "$keyring" 2>/dev/null \
+                || sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 86B72ED9 >/dev/null 2>&1 || true
+        else
+            sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 86B72ED9 >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if [[ -f "$keyring" ]]; then
+        echo "deb [arch=amd64 signed-by=${keyring}] https://pkg.mxe.cc/repos/apt ${codename} main" \
+            | sudo tee /etc/apt/sources.list.d/mxeapt.list >/dev/null
+    else
+        echo "deb [arch=amd64] https://pkg.mxe.cc/repos/apt ${codename} main" \
+            | sudo tee /etc/apt/sources.list.d/mxeapt.list >/dev/null
+    fi
+
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq || {
+        warn "MXE apt update failed"
+        return 1
+    }
+    return 0
+}
+
+install_mxe_qt() {
+    log "Installing MXE Qt5 packages for GUI cross-compile (${MXE_TARGET})"
+    setup_mxe_apt || return 1
+
+    # Try meta qt5 first, then individual modules
+    local candidates=(
+        "mxe-${MXE_APT_ARCH}-w64-mingw32.static-qt5"
+        "mxe-${MXE_APT_ARCH}-w64-mingw32.static-qtbase"
+    )
+    local tools_pkg="mxe-${MXE_APT_ARCH}-w64-mingw32.static-qttools"
+    local installed=0
+    local pkg
+    for pkg in "${candidates[@]}"; do
+        if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" 2>/dev/null; then
+            installed=1
+            break
+        fi
+    done
+    if [[ "$installed" -ne 1 ]]; then
+        warn "Could not install MXE Qt packages via apt"
+        return 1
+    fi
+    # qttools provides lrelease (best-effort)
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$tools_pkg" 2>/dev/null || true
+    return 0
+}
+
+build_qt_from_source() {
+    local marker="$DEPS/.qt.ok"
+    [[ -f "$marker" && -x "$DEPS/qt/bin/qmake" ]] && {
+        log "Qt already built at $DEPS/qt"
+        return 0
+    }
+
+    log "Building Qt ${QT_VER} (qtbase) for ${TARGET} — this can take a long time"
+    mkdir -p "$SRC_DEPS"
+    cd "$SRC_DEPS"
+
+    local qt_tb="qtbase-everywhere-src-${QT_VER}.tar.xz"
+    download "https://download.qt.io/archive/qt/5.15/${QT_VER}/submodules/${qt_tb}" "$qt_tb" \
+        || download "https://download.qt.io/official_releases/qt/5.15/${QT_VER}/submodules/${qt_tb}" "$qt_tb" \
+        || download "https://ftp.fau.de/qtproject/archive/qt/5.15/${QT_VER}/submodules/${qt_tb}" "$qt_tb"
+
+    rm -rf "qtbase-everywhere-src-${QT_VER}" "qt-build"
+    tar xf "$qt_tb"
+    mkdir -p qt-build
+    cd qt-build
+
+    # Minimal static Qt for wallet GUI (widgets + network)
+    "../qtbase-everywhere-src-${QT_VER}/configure" \
+        -prefix "$DEPS/qt" \
+        -release -static -opensource -confirm-license \
+        -xplatform win32-g++ \
+        -device-option "CROSS_COMPILE=${TARGET}-" \
+        -nomake examples -nomake tests \
+        -no-opengl -no-cups -no-pch \
+        -no-feature-sql -no-feature-testlib \
+        -qt-zlib -qt-libpng -qt-libjpeg -qt-freetype -qt-pcre -qt-harfbuzz \
+        -skip qt3d -skip qtactiveqt -skip qtandroidextras -skip qtcanvas3d \
+        -openssl-linked OPENSSL_PREFIX="$DEPS" \
+        -I "$DEPS/include" -L "$DEPS/lib" \
+        -verbose
+
+    make -j"$JOBS"
+    make install
+
+    # Host lrelease: prefer system qttools if available
+    if ! [[ -x "$DEPS/qt/bin/lrelease" ]]; then
+        if need_cmd lrelease; then
+            ln -sfn "$(command -v lrelease)" "$DEPS/qt/bin/lrelease" || true
+        elif need_cmd lrelease-qt5; then
+            ln -sfn "$(command -v lrelease-qt5)" "$DEPS/qt/bin/lrelease" || true
+        fi
+    fi
+
+    verify_file "$DEPS/qt/bin/qmake" "Qt qmake not installed"
+    touch "$marker"
+}
+
+find_mingw_qmake() {
+    if [[ -n "${QT_MINGW_QMAKE:-}" && -x "${QT_MINGW_QMAKE}" ]]; then
+        echo "$QT_MINGW_QMAKE"
+        return 0
+    fi
+    local c
+    for c in \
+        "${MXE_PREFIX}/usr/bin/${MXE_TARGET}-qmake-qt5" \
+        "${MXE_PREFIX}/usr/${MXE_TARGET}/qt5/bin/qmake" \
+        "$DEPS/qt/bin/qmake" \
+        "$HOME/mxe/usr/bin/${MXE_TARGET}-qmake-qt5" \
+        "$HOME/mxe/usr/${MXE_TARGET}/qt5/bin/qmake"
+    do
+        if [[ -x "$c" ]]; then
+            echo "$c"
+            return 0
+        fi
+    done
+    return 1
+}
+
+ensure_qt() {
+    if [[ "$BUILD_GUI" != "1" ]]; then
+        return 0
+    fi
+    if find_mingw_qmake >/dev/null; then
+        log "Found mingw Qt qmake: $(find_mingw_qmake)"
+        return 0
+    fi
+    log "Qt for mingw not found — installing GUI dependencies"
+    if install_mxe_qt && find_mingw_qmake >/dev/null; then
+        log "MXE Qt ready: $(find_mingw_qmake)"
+        return 0
+    fi
+    warn "MXE Qt install unavailable; building qtbase from source"
+    build_qt_from_source
+    find_mingw_qmake >/dev/null || die "Failed to provision Qt for Windows GUI"
+}
+
+# ---------- builds ----------
 
 build_cli() {
     log "Building Windows CLI (RNRCd.exe)"
     cd "$ROOT/src"
-    # Clean previous native leveldb objects that would break mingw link
     make -f makefile.linux-mingw clean || true
     rm -f leveldb/libleveldb.a leveldb/libmemenv.a
     make -C leveldb clean || true
@@ -317,110 +519,105 @@ build_cli() {
     file "$RELEASE_DIR/RNRCd.exe" || true
 }
 
-find_mingw_qmake() {
-    if [[ -n "${QT_MINGW_QMAKE:-}" && -x "${QT_MINGW_QMAKE}" ]]; then
-        echo "$QT_MINGW_QMAKE"
-        return 0
-    fi
-    local c
-    for c in \
-        "${MXE_PREFIX:-/usr/lib/mxe}/usr/${TARGET}/qt5/bin/qmake" \
-        "$DEPS/qt/bin/qmake" \
-        "$HOME/mxe/usr/${TARGET}/qt5/bin/qmake"
-    do
-        if [[ -x "$c" ]]; then
-            echo "$c"
-            return 0
-        fi
-    done
-    return 1
-}
-
 build_gui() {
     if [[ "$BUILD_GUI" != "1" ]]; then
         log "Skipping GUI (BUILD_GUI=$BUILD_GUI)"
         return 0
     fi
+
     local qmake_bin
-    if ! qmake_bin="$(find_mingw_qmake)"; then
-        warn "No mingw Qt qmake found — CLI was built; GUI skipped."
-        warn "Install MXE Qt5 for ${TARGET}, or set QT_MINGW_QMAKE=/path/to/qmake and re-run."
-        warn "See doc/build-windows.txt section 8."
-        return 0
+    qmake_bin="$(find_mingw_qmake)" || die "mingw Qt qmake missing after ensure_qt"
+
+    log "Building Windows GUI (RNRC-qt.exe) with $qmake_bin"
+    # Ensure MXE tools are on PATH when using MXE qmake
+    if [[ "$qmake_bin" == *"/mxe/"* ]]; then
+        export PATH="${MXE_PREFIX}/usr/bin:${PATH}"
     fi
-    log "Building Windows GUI with $qmake_bin"
+
     cd "$ROOT"
-    # Out-of-tree build dir for Windows GUI
     local bdir="$ROOT/build-win-qt"
     rm -rf "$bdir"
     mkdir -p "$bdir"
     cd "$bdir"
-    "$qmake_bin" -spec win32-g++ \
-        "USE_UPNP=-" "USE_QRCODE=0" "RELEASE=1" \
-        "BOOST_LIB_SUFFIX=${BOOST_LIB_SUFFIX}" \
-        "BOOST_INCLUDE_PATH=${DEPS}/include" \
-        "BOOST_LIB_PATH=${DEPS}/lib" \
-        "BDB_INCLUDE_PATH=${DEPS}/include" \
-        "BDB_LIB_PATH=${DEPS}/lib" \
-        "OPENSSL_INCLUDE_PATH=${DEPS}/include" \
-        "OPENSSL_LIB_PATH=${DEPS}/lib" \
-        "QMAKE_CC=${TARGET}-gcc" \
-        "QMAKE_CXX=${TARGET}-g++" \
-        "QMAKE_LINK=${TARGET}-g++" \
-        "QMAKE_LIB=${TARGET}-ar" \
-        "QMAKE_RANLIB=${TARGET}-ranlib" \
-        "$ROOT/RNRC-qt.pro"
+
+    # Clean native leveldb so qmake rebuilds for Windows
+    rm -f "$ROOT/src/leveldb/libleveldb.a" "$ROOT/src/leveldb/libmemenv.a"
+    make -C "$ROOT/src/leveldb" clean >/dev/null 2>&1 || true
+
+    local qmake_args=(
+        "USE_UPNP=-"
+        "USE_QRCODE=0"
+        "USE_DBUS=0"
+        "RELEASE=1"
+        "MINGW_THREAD_BUGFIX=0"
+        "BOOST_LIB_SUFFIX=${BOOST_LIB_SUFFIX}"
+        "BOOST_THREAD_LIB_SUFFIX=${BOOST_THREAD_LIB_SUFFIX}"
+        "BOOST_INCLUDE_PATH=${DEPS}/include"
+        "BOOST_LIB_PATH=${DEPS}/lib"
+        "BDB_INCLUDE_PATH=${DEPS}/include"
+        "BDB_LIB_PATH=${DEPS}/lib"
+        "OPENSSL_INCLUDE_PATH=${DEPS}/include"
+        "OPENSSL_LIB_PATH=${DEPS}/lib"
+    )
+
+    # When using our own Qt (not MXE wrappers), force mingw compilers
+    if [[ "$qmake_bin" == "$DEPS/qt/bin/qmake" ]]; then
+        qmake_args+=(
+            -spec win32-g++
+            "QMAKE_CC=${TARGET}-gcc"
+            "QMAKE_CXX=${TARGET}-g++"
+            "QMAKE_LINK=${TARGET}-g++"
+            "QMAKE_LIB=${TARGET}-ar"
+            "QMAKE_RANLIB=${TARGET}-ranlib"
+            "QMAKE_LRELEASE=$(command -v lrelease-qt5 || command -v lrelease || echo lrelease)"
+        )
+    fi
+
+    "$qmake_bin" "${qmake_args[@]}" "$ROOT/RNRC-qt.pro"
     make -j"$JOBS"
+
     local exe
-    exe="$(find "$bdir" "$ROOT" -maxdepth 3 -name 'RNRC-qt.exe' | head -1 || true)"
+    exe="$(find "$bdir" -name 'RNRC-qt.exe' | head -1 || true)"
+    [[ -n "$exe" ]] || exe="$(find "$ROOT" -maxdepth 3 -name 'RNRC-qt.exe' | head -1 || true)"
     [[ -n "$exe" ]] || die "RNRC-qt.exe not produced"
     mkdir -p "$RELEASE_DIR"
     cp -f "$exe" "$RELEASE_DIR/"
-    "${TARGET}-strip" "$RELEASE_DIR/RNRC-qt.exe" 2>/dev/null || true
+    if need_cmd "${TARGET}-strip"; then
+        "${TARGET}-strip" "$RELEASE_DIR/RNRC-qt.exe" 2>/dev/null || true
+    elif [[ -x "${MXE_PREFIX}/usr/bin/${MXE_TARGET}-strip" ]]; then
+        "${MXE_PREFIX}/usr/bin/${MXE_TARGET}-strip" "$RELEASE_DIR/RNRC-qt.exe" 2>/dev/null || true
+    fi
     file "$RELEASE_DIR/RNRC-qt.exe" || true
 }
 
 main() {
     check_ubuntu
-
-    local mingw_pkg_arch="$TARGET_ARCH"
-    # Debian/Ubuntu package names use x86-64 (hyphen), not x86_64
-    [[ "$TARGET_ARCH" == "x86_64" ]] && mingw_pkg_arch="x86-64"
-
-    local pkgs=(
-        build-essential curl wget git ca-certificates
-        autoconf automake libtool pkg-config cmake unzip zip
-        python3
-        mingw-w64
-        "g++-mingw-w64-${mingw_pkg_arch}"
-        "gcc-mingw-w64-${mingw_pkg_arch}"
-    )
-    if need_cmd apt-get; then
-        apt_install "${pkgs[@]}"
-    else
-        warn "apt-get not found; ensure mingw-w64 toolchain is installed."
-    fi
-
+    install_host_packages
     setup_mingw_posix
     mkdir -p "$DEPS"/{include,lib,src} "$RELEASE_DIR"
 
+    # Shared crypto/db deps for CLI and GUI
     build_zlib
     build_openssl
     build_bdb
     build_boost
-    if [[ "$USE_UPNP" != "-" && "$USE_UPNP" != "0" ]]; then
-        build_miniupnpc
-    else
-        # Still build miniupnpc so optional later use works
-        build_miniupnpc || warn "miniupnpc build failed (optional)"
-    fi
+    build_miniupnpc || warn "miniupnpc build failed (optional when USE_UPNP=-)"
 
     check_deps_links
+
+    # Provision Qt BEFORE builds so both targets are guaranteed when BUILD_GUI=1
+    ensure_qt
+
     build_cli
     build_gui
 
-    log "Done. Artifacts:"
+    log "Done. Artifacts in ${RELEASE_DIR}:"
     ls -la "$RELEASE_DIR"
+    verify_file "$RELEASE_DIR/RNRCd.exe" "CLI artifact missing"
+    if [[ "$BUILD_GUI" == "1" ]]; then
+        verify_file "$RELEASE_DIR/RNRC-qt.exe" "GUI artifact missing"
+    fi
+    log "Windows CLI + GUI build completed successfully."
 }
 
 main "$@"
