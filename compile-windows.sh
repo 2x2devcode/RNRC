@@ -351,27 +351,25 @@ setup_mxe_apt() {
     fi
 
     log "Configuring MXE apt repository (dist=${codename})"
-    sudo apt-get install -y -qq software-properties-common lsb-release gnupg apt-transport-https ca-certificates >/dev/null
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        software-properties-common lsb-release gnupg apt-transport-https ca-certificates >/dev/null
 
-    # Prefer modern signed-by keyring; fall back to apt-key
     local keyring=/usr/share/keyrings/mxe-archive-keyring.gpg
-    if [[ ! -f "$keyring" ]]; then
-        if need_cmd gpg; then
-            curl -fsSL "https://pkg.mxe.cc/repos/apt/mxe.key" \
-                | sudo gpg --dearmor -o "$keyring" 2>/dev/null \
-                || sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 86B72ED9 >/dev/null 2>&1 || true
-        else
-            sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 86B72ED9 >/dev/null 2>&1 || true
-        fi
+    if [[ ! -s "$keyring" ]]; then
+        log "Importing MXE apt signing key"
+        local tmpasc
+        tmpasc="$(mktemp)"
+        # Key 86B72ED9 (Tony Theodore) — also covers subkey C6BF758A33A3A276
+        curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x86B72ED9" -o "$tmpasc" \
+            || curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xC6BF758A33A3A276" -o "$tmpasc" \
+            || die "Could not download MXE GPG key"
+        sudo gpg --batch --yes --dearmor -o "$keyring" < "$tmpasc"
+        rm -f "$tmpasc"
     fi
+    [[ -s "$keyring" ]] || die "MXE keyring not created"
 
-    if [[ -f "$keyring" ]]; then
-        echo "deb [arch=amd64 signed-by=${keyring}] https://pkg.mxe.cc/repos/apt ${codename} main" \
-            | sudo tee /etc/apt/sources.list.d/mxeapt.list >/dev/null
-    else
-        echo "deb [arch=amd64] https://pkg.mxe.cc/repos/apt ${codename} main" \
-            | sudo tee /etc/apt/sources.list.d/mxeapt.list >/dev/null
-    fi
+    echo "deb [arch=amd64 signed-by=${keyring}] https://pkg.mxe.cc/repos/apt ${codename} main" \
+        | sudo tee /etc/apt/sources.list.d/mxeapt.list >/dev/null
 
     sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq || {
         warn "MXE apt update failed"
@@ -384,16 +382,17 @@ install_mxe_qt() {
     log "Installing MXE Qt5 packages for GUI cross-compile (${MXE_TARGET})"
     setup_mxe_apt || return 1
 
-    # Try meta qt5 first, then individual modules
-    local candidates=(
+    # Prefer full qt5 meta, then qtbase + qttools
+    local pkgs_try=(
         "mxe-${MXE_APT_ARCH}-w64-mingw32.static-qt5"
         "mxe-${MXE_APT_ARCH}-w64-mingw32.static-qtbase"
     )
     local tools_pkg="mxe-${MXE_APT_ARCH}-w64-mingw32.static-qttools"
     local installed=0
     local pkg
-    for pkg in "${candidates[@]}"; do
-        if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" 2>/dev/null; then
+    for pkg in "${pkgs_try[@]}"; do
+        log "Trying apt package: $pkg"
+        if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg"; then
             installed=1
             break
         fi
@@ -402,9 +401,19 @@ install_mxe_qt() {
         warn "Could not install MXE Qt packages via apt"
         return 1
     fi
-    # qttools provides lrelease (best-effort)
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$tools_pkg" 2>/dev/null || true
-    return 0
+
+    # Sanity-check qmake wrapper
+    if [[ -x "${MXE_PREFIX}/usr/bin/${MXE_TARGET}-qmake-qt5" ]]; then
+        log "MXE qmake: ${MXE_PREFIX}/usr/bin/${MXE_TARGET}-qmake-qt5"
+        return 0
+    fi
+    if [[ -x "${MXE_PREFIX}/usr/${MXE_TARGET}/qt5/bin/qmake" ]]; then
+        log "MXE qmake: ${MXE_PREFIX}/usr/${MXE_TARGET}/qt5/bin/qmake"
+        return 0
+    fi
+    warn "MXE Qt packages installed but qmake not found under ${MXE_PREFIX}"
+    return 1
 }
 
 build_qt_from_source() {
