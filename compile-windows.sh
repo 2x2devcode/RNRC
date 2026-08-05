@@ -419,24 +419,55 @@ install_mxe_qt() {
 # Qt 5.15.2 (and some later 5.15.x) break on GCC 11+ because <limits> is no
 # longer pulled in transitively. Without it, specializing std::numeric_limits
 # yields: "'numeric_limits' is not a class template" in qfloat16.h / qendian.h.
+qtbase_has_limits_patch() {
+    local src="$1"
+    local f="$src/src/corelib/global/qfloat16.h"
+    [[ -f "$f" ]] && grep -qE '^[[:space:]]*#include[[:space:]]*<limits>' "$f"
+}
+
 patch_qtbase_for_gcc11() {
     local src="$1"
+    local patch_file="$ROOT/patches/qtbase-5.15.2-gcc11-limits.diff"
     local f
+
+    if qtbase_has_limits_patch "$src"; then
+        log "Qt GCC 11+ <limits> patch already present in $src"
+        return 0
+    fi
+
     log "Applying GCC 11+ Qt patches (#include <limits>) under $src"
+
+    if [[ -f "$patch_file" ]]; then
+        # Prefer the checked-in unified diff (reliable across sed versions).
+        if (cd "$src" && patch -p1 --forward --batch < "$patch_file"); then
+            log "Applied $patch_file"
+        else
+            warn "patch(1) failed or already applied; falling back to sed"
+        fi
+    fi
 
     ensure_include_limits() {
         local file="$1"
+        local after="${2:-}"
         [[ -f "$file" ]] || return 0
         if grep -qE '^[[:space:]]*#include[[:space:]]*<limits>' "$file"; then
             return 0
         fi
-        if grep -q '#include <QtCore/qglobal.h>' "$file"; then
-            # Insert immediately after qglobal.h (canonical Qt fix)
+        if [[ -n "$after" ]] && grep -qF "$after" "$file"; then
+            # Insert on the line after the first match of $after
+            awk -v after="$after" '
+                !done && index($0, after) { print; print "#include <limits>"; done=1; next }
+                { print }
+            ' "$file" > "${file}.rnrc.tmp" && mv "${file}.rnrc.tmp" "$file"
+        elif grep -q '#include <QtCore/qmetatype.h>' "$file"; then
+            sed -i '/#include <QtCore\/qmetatype.h>/a #include <limits>' "$file"
+        elif grep -q '#include <QtCore/qglobal.h>' "$file"; then
             sed -i '/#include <QtCore\/qglobal.h>/a #include <limits>' "$file"
-        elif grep -q '#include <limits.h>' "$file"; then
-            sed -i '/#include <limits.h>/a #include <limits>' "$file"
+        elif grep -q '#include <array>' "$file"; then
+            sed -i '/#include <array>/a #include <limits>' "$file"
+        elif grep -q '#include <QtCore/qbytearray.h>' "$file"; then
+            sed -i '/#include <QtCore\/qbytearray.h>/a #include <limits>' "$file"
         else
-            # Fallback: after the include guard / first #include
             sed -i '0,/#include /s//#include <limits>\n&/' "$file"
         fi
         grep -qE '^[[:space:]]*#include[[:space:]]*<limits>' "$file" \
@@ -444,14 +475,13 @@ patch_qtbase_for_gcc11() {
         log "  patched $(basename "$file")"
     }
 
-    for f in \
-        "$src/src/corelib/global/qfloat16.h" \
-        "$src/src/corelib/global/qendian.h" \
-        "$src/src/corelib/text/qbytearraymatcher.h" \
-        "$src/src/corelib/tools/qoffsetstringarray_p.h"
-    do
-        ensure_include_limits "$f"
-    done
+    ensure_include_limits "$src/src/corelib/global/qfloat16.h" '#include <QtCore/qmetatype.h>'
+    ensure_include_limits "$src/src/corelib/global/qendian.h" '#include <QtCore/qglobal.h>'
+    ensure_include_limits "$src/src/corelib/text/qbytearraymatcher.h" '#include <QtCore/qbytearray.h>'
+    ensure_include_limits "$src/src/corelib/tools/qoffsetstringarray_p.h" '#include <array>'
+
+    qtbase_has_limits_patch "$src" \
+        || die "qfloat16.h still missing #include <limits> after patch — aborting Qt build"
 }
 
 build_qt_from_source() {
