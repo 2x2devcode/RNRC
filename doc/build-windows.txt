@@ -27,6 +27,29 @@ Optional environment variables:
   QT_USE_OPENSSL=1         # link OpenSSL into Qt (default: Schannel)
   JOBS=4                   # parallel build jobs
   DEPS_DIR=/path/to/deps   # override depends prefix
+  LOG_DIR=/path/to/logs    # override log directory (default: release/windows/logs)
+
+Build logs
+----------
+
+Every run of `./compile-windows.sh` writes timestamped logs under
+`release/windows/logs/` (override with `LOG_DIR`):
+
+  compile-windows-YYYYMMDD-HHMMSS.log         full console output
+  compile-windows-YYYYMMDD-HHMMSS.errors.txt  extracted error lines
+  cli-YYYYMMDD-HHMMSS.log                    CLI make output
+  gui-YYYYMMDD-HHMMSS.log                    GUI make output
+  qt-YYYYMMDD-HHMMSS.log                     Qt configure/make (if built from source)
+
+Symlinks for the latest run:
+
+  release/windows/logs/compile-windows-latest.log
+  release/windows/logs/compile-windows-latest.errors.txt
+  release/windows/logs/cli-latest.log
+  release/windows/logs/gui-latest.log
+  release/windows/logs/qt-latest.log
+
+On failure, open the `.errors.txt` file first, then the full `.log`.
 
 Qt from source (GCC 11+ / SSL)
 ------------------------------

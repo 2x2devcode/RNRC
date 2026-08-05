@@ -14,6 +14,10 @@ DEPS="${DEPS_DIR:-$ROOT/depends/$TARGET}"
 SRC_DEPS="$DEPS/src"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 2)}"
 RELEASE_DIR="$ROOT/release/windows"
+LOG_DIR="${LOG_DIR:-$RELEASE_DIR/logs}"
+BUILD_STAMP="${BUILD_STAMP:-$(date +%Y%m%d-%H%M%S)}"
+LOG_FILE="${LOG_FILE:-$LOG_DIR/compile-windows-${BUILD_STAMP}.log}"
+ERRORS_FILE="${ERRORS_FILE:-$LOG_DIR/compile-windows-${BUILD_STAMP}.errors.txt}"
 BUILD_GUI="${BUILD_GUI:-1}"
 USE_UPNP="${USE_UPNP:--}"
 MXE_PREFIX="${MXE_PREFIX:-/usr/lib/mxe}"
@@ -35,9 +39,67 @@ else
     MXE_APT_ARCH="i686"
 fi
 
-log()  { printf '\n==> %s\n' "$*"; }
-warn() { printf 'WARNING: %s\n' "$*" >&2; }
-die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+
+log()  { printf '\n[%s] ==> %s\n' "$(ts)" "$*"; }
+warn() { printf '[%s] WARNING: %s\n' "$(ts)" "$*" >&2; }
+die()  {
+    printf '[%s] ERROR: %s\n' "$(ts)" "$*" >&2
+    if [[ -n "${LOG_FILE:-}" ]]; then
+        printf '[%s] ERROR: %s\n' "$(ts)" "$*" >> "$LOG_FILE" 2>/dev/null || true
+        printf '[%s] Full build log: %s\n' "$(ts)" "$LOG_FILE" >&2
+        printf '[%s] Error extract:  %s\n' "$(ts)" "${ERRORS_FILE:-}" >&2
+    fi
+    exit 1
+}
+
+# Append a short "what failed" section to the log + errors file.
+write_error_extract() {
+    local src="${1:-$LOG_FILE}"
+    local dest="${2:-$ERRORS_FILE}"
+    [[ -f "$src" ]] || return 0
+    mkdir -p "$(dirname "$dest")"
+    {
+        echo "=== RNRC Windows build — error extract ==="
+        echo "Generated: $(date -Is)"
+        echo "Source log: $src"
+        echo
+        echo "--- matching lines (error / undefined reference / make fail) ---"
+        grep -nE \
+            'error:|undefined reference|collect2:|fatal error:|^\[.*\] ERROR:|gmake: \*\*\*|make(\[[0-9]+\])?: \*\*\*|ERROR: Feature' \
+            "$src" 2>/dev/null | tail -n 200 || echo "(no matching error lines found)"
+        echo
+        echo "--- last 80 lines of full log ---"
+        tail -n 80 "$src" 2>/dev/null || true
+    } > "$dest"
+}
+
+setup_logging() {
+    mkdir -p "$LOG_DIR" "$RELEASE_DIR"
+    : > "$LOG_FILE"
+    ln -sfn "$(basename "$LOG_FILE")" "$LOG_DIR/compile-windows-latest.log"
+    ln -sfn "$(basename "$ERRORS_FILE")" "$LOG_DIR/compile-windows-latest.errors.txt"
+    {
+        echo "================================================================"
+        echo " RNRC compile-windows.sh"
+        echo " Started:     $(date -Is)"
+        echo " Log file:    $LOG_FILE"
+        echo " Errors file: $ERRORS_FILE"
+        echo " ROOT:        $ROOT"
+        echo " TARGET:      $TARGET"
+        echo " DEPS:        $DEPS"
+        echo " JOBS:        $JOBS"
+        echo " BUILD_GUI:   $BUILD_GUI"
+        echo " Host:        $(uname -a 2>/dev/null || true)"
+        if [[ -f /etc/os-release ]]; then
+            # shellcheck source=/dev/null
+            . /etc/os-release
+            echo " OS:          ${PRETTY_NAME:-unknown}"
+        fi
+        echo "================================================================"
+        echo
+    } | tee -a "$LOG_FILE"
+}
 
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || return 1
@@ -528,30 +590,59 @@ build_qt_from_source() {
         log "Configuring Qt with Windows Schannel (set QT_USE_OPENSSL=1 to link OpenSSL into Qt)"
     fi
 
-    "../qtbase-everywhere-src-${QT_VER}/configure" \
-        -prefix "$DEPS/qt" \
-        -release -static -opensource -confirm-license \
-        -xplatform win32-g++ \
-        -device-option "CROSS_COMPILE=${TARGET}-" \
-        -nomake examples -nomake tests -nomake tools \
-        -no-opengl -no-cups -no-pch -no-dbus -no-icu \
-        -no-feature-sql -no-feature-testlib \
-        -qt-zlib -qt-libpng -qt-libjpeg -qt-freetype -qt-pcre -qt-harfbuzz \
-        "${qt_ssl_args[@]}" \
-        -I "$DEPS/include" -L "$DEPS/lib" \
-        -verbose
+    local qt_log="$LOG_DIR/qt-${BUILD_STAMP}.log"
+    ln -sfn "$(basename "$qt_log")" "$LOG_DIR/qt-latest.log"
+    log "Qt stage log: $qt_log"
+
+    set +e
+    {
+        "../qtbase-everywhere-src-${QT_VER}/configure" \
+            -prefix "$DEPS/qt" \
+            -release -static -opensource -confirm-license \
+            -xplatform win32-g++ \
+            -device-option "CROSS_COMPILE=${TARGET}-" \
+            -nomake examples -nomake tests \
+            -no-opengl -no-cups -no-pch -no-dbus -no-icu \
+            -no-feature-sql -no-feature-testlib \
+            -qt-zlib -qt-libpng -qt-libjpeg -qt-freetype -qt-pcre -qt-harfbuzz \
+            "${qt_ssl_args[@]}" \
+            -I "$DEPS/include" -L "$DEPS/lib" \
+            -verbose
+    } 2>&1 | tee "$qt_log"
+    local conf_rc=${PIPESTATUS[0]}
+    set -e
+    if [[ "$conf_rc" -ne 0 ]]; then
+        write_error_extract "$qt_log" "$ERRORS_FILE"
+        die "Qt configure failed (exit $conf_rc) — see $qt_log and $LOG_FILE"
+    fi
 
     # Fail early with a clear message if openssl was requested but not detected
     if [[ "${QT_USE_OPENSSL:-0}" == "1" && -f config.summary ]]; then
         if ! grep -E '[[:space:]]OpenSSL[[:space:].]+yes' config.summary >/dev/null; then
             warn "Qt config.summary SSL lines:"
             grep -E 'OpenSSL|Schannel' config.summary || true
+            write_error_extract "$qt_log" "$ERRORS_FILE"
             die "Qt failed to detect OpenSSL (libs.openssl). Use QT_USE_OPENSSL=0 (Schannel) or fix DEPS OpenSSL."
         fi
     fi
 
-    make -j"$JOBS"
-    make install
+    set +e
+    make -j"$JOBS" 2>&1 | tee -a "$qt_log"
+    local make_rc=${PIPESTATUS[0]}
+    set -e
+    if [[ "$make_rc" -ne 0 ]]; then
+        write_error_extract "$qt_log" "$ERRORS_FILE"
+        die "Qt make failed (exit $make_rc) — see $qt_log and $LOG_FILE"
+    fi
+
+    set +e
+    make install 2>&1 | tee -a "$qt_log"
+    local inst_rc=${PIPESTATUS[0]}
+    set -e
+    if [[ "$inst_rc" -ne 0 ]]; then
+        write_error_extract "$qt_log" "$ERRORS_FILE"
+        die "Qt make install failed (exit $inst_rc) — see $qt_log and $LOG_FILE"
+    fi
 
     # Host lrelease: prefer system qttools if available
     if ! [[ -x "$DEPS/qt/bin/lrelease" ]]; then
@@ -609,16 +700,30 @@ ensure_qt() {
 
 build_cli() {
     log "Building Windows CLI (RNRCd.exe)"
-    cd "$ROOT/src"
-    make -f makefile.linux-mingw clean || true
-    rm -f leveldb/libleveldb.a leveldb/libmemenv.a
-    make -C leveldb clean || true
-    make -f makefile.linux-mingw -j"$JOBS" \
-        TARGET_PLATFORM="$TARGET_ARCH" \
-        DEPSDIR="$DEPS" \
-        BOOST_LIB_SUFFIX="$BOOST_LIB_SUFFIX" \
-        BOOST_THREAD_LIB="$BOOST_THREAD_LIB" \
-        USE_UPNP="$USE_UPNP"
+    local stage_log="$LOG_DIR/cli-${BUILD_STAMP}.log"
+    ln -sfn "$(basename "$stage_log")" "$LOG_DIR/cli-latest.log"
+    log "CLI stage log: $stage_log"
+
+    set +e
+    (
+        cd "$ROOT/src"
+        make -f makefile.linux-mingw clean || true
+        rm -f leveldb/libleveldb.a leveldb/libmemenv.a
+        make -C leveldb clean || true
+        make -f makefile.linux-mingw -j"$JOBS" \
+            TARGET_PLATFORM="$TARGET_ARCH" \
+            DEPSDIR="$DEPS" \
+            BOOST_LIB_SUFFIX="$BOOST_LIB_SUFFIX" \
+            BOOST_THREAD_LIB="$BOOST_THREAD_LIB" \
+            USE_UPNP="$USE_UPNP"
+    ) 2>&1 | tee "$stage_log"
+    local rc=${PIPESTATUS[0]}
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        write_error_extract "$stage_log" "$ERRORS_FILE"
+        die "CLI build failed (exit $rc) — see $stage_log and $LOG_FILE"
+    fi
+
     verify_file "$ROOT/src/RNRCd.exe" "CLI build failed"
     mkdir -p "$RELEASE_DIR"
     cp -f "$ROOT/src/RNRCd.exe" "$RELEASE_DIR/"
@@ -682,15 +787,22 @@ build_gui() {
 
     "$qmake_bin" "${qmake_args[@]}" "$ROOT/RNRC-qt.pro"
 
-    local makelog="$bdir/build.log"
+    local makelog="$LOG_DIR/gui-${BUILD_STAMP}.log"
+    ln -sfn "$(basename "$makelog")" "$LOG_DIR/gui-latest.log"
+    # Keep a copy next to the qmake build tree as well
+    local bdir_log="$bdir/build.log"
+    log "GUI stage log: $makelog"
+
     set +e
-    make -j"$JOBS" 2>&1 | tee "$makelog"
+    make -j"$JOBS" 2>&1 | tee "$makelog" | tee "$bdir_log"
     local make_rc=${PIPESTATUS[0]}
     set -e
     if [[ "$make_rc" -ne 0 ]]; then
-        warn "GUI make failed (exit $make_rc). Last errors from $makelog:"
-        grep -E 'error:|undefined reference|collect2:|fatal error:' "$makelog" | tail -n 80 >&2 || true
-        die "Windows GUI build failed — see $makelog"
+        warn "GUI make failed (exit $make_rc). Extracting errors..."
+        write_error_extract "$makelog" "$ERRORS_FILE"
+        # Also print a short summary to the console
+        grep -nE 'error:|undefined reference|collect2:|fatal error:' "$makelog" | tail -n 80 >&2 || true
+        die "Windows GUI build failed — see $makelog and $LOG_FILE"
     fi
 
     local exe
@@ -711,7 +823,7 @@ main() {
     check_ubuntu
     install_host_packages
     setup_mingw_posix
-    mkdir -p "$DEPS"/{include,lib,src} "$RELEASE_DIR"
+    mkdir -p "$DEPS"/{include,lib,src} "$RELEASE_DIR" "$LOG_DIR"
 
     # Shared crypto/db deps for CLI and GUI
     build_zlib
@@ -735,6 +847,55 @@ main() {
         verify_file "$RELEASE_DIR/RNRC-qt.exe" "GUI artifact missing"
     fi
     log "Windows CLI + GUI build completed successfully."
+    log "Full build log: $LOG_FILE"
+    log "Latest symlink:  $LOG_DIR/compile-windows-latest.log"
 }
 
-main "$@"
+# Entry point: capture the entire run in a timestamped log file.
+run_with_log() {
+    setup_logging
+    local status_file
+    status_file="$(mktemp)"
+    set +e
+    (
+        # set -e inside the subshell so failures in main abort it
+        set -euo pipefail
+        main "$@"
+        echo 0 > "$status_file"
+    ) 2>&1 | tee -a "$LOG_FILE"
+    # If main died via `exit` (die), the status file may be missing
+    local rc
+    if [[ -f "$status_file" ]]; then
+        rc="$(cat "$status_file")"
+    else
+        rc=1
+    fi
+    rm -f "$status_file"
+    set -e
+
+    if [[ "$rc" -ne 0 ]]; then
+        write_error_extract "$LOG_FILE" "$ERRORS_FILE"
+        {
+            echo
+            echo "================================================================"
+            echo " Build FAILED at $(date -Is) (exit $rc)"
+            echo " Full log:      $LOG_FILE"
+            echo " Error extract: $ERRORS_FILE"
+            echo " Latest log:    $LOG_DIR/compile-windows-latest.log"
+            echo " Latest errors: $LOG_DIR/compile-windows-latest.errors.txt"
+            echo "================================================================"
+        } | tee -a "$LOG_FILE"
+        exit "$rc"
+    fi
+
+    {
+        echo
+        echo "================================================================"
+        echo " Build SUCCEEDED at $(date -Is)"
+        echo " Full log:   $LOG_FILE"
+        echo " Latest log: $LOG_DIR/compile-windows-latest.log"
+        echo "================================================================"
+    } | tee -a "$LOG_FILE"
+}
+
+run_with_log "$@"
