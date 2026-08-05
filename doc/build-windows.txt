@@ -208,6 +208,20 @@ Verification checklist
 
  file src/RNRCd.exe should report PE32+ executable (x86-64) for Windows.
 
+Distributing the .exe
+---------------------
+
+Both wallets are linked with a fully static MinGW runtime (`-static`), so they
+must NOT require `libwinpthread-1.dll`, `libgcc_s_seh-1.dll`, or
+`libstdc++-6.dll` on the Windows PC. After build, `compile-windows.sh` checks
+imports with `objdump` and fails if those DLLs are still referenced.
+
+If an older GUI build asks for `libwinpthread-1.dll`, rebuild:
+
+    git pull origin master
+    rm -rf build-win-qt
+    BUILD_GUI=1 ./compile-windows.sh
+
 If the GUI `make` fails, check `release/windows/logs/compile-windows-latest.errors.txt`
 first, then `gui-latest.log` / `compile-windows-latest.log`. A copy is also kept
 at `build-win-qt/build.log`.

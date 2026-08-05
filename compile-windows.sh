@@ -178,6 +178,31 @@ verify_file() {
     [[ -e "$f" ]] || die "$msg (missing: $f)"
 }
 
+# Fail if a Windows PE still imports MinGW runtime DLLs (won't run without them).
+verify_no_mingw_runtime_dlls() {
+    local exe="$1"
+    local dumpobj="${TARGET}-objdump"
+    need_cmd "$dumpobj" || {
+        warn "Skipping DLL import check (no $dumpobj)"
+        return 0
+    }
+    local imports
+    imports="$("$dumpobj" -p "$exe" 2>/dev/null | grep -i 'DLL Name' || true)"
+    local bad=()
+    local dll
+    for dll in libwinpthread-1.dll libgcc_s_seh-1.dll libgcc_s_dw2-1.dll libstdc++-6.dll libssp-0.dll; do
+        if echo "$imports" | grep -qi "$dll"; then
+            bad+=("$dll")
+        fi
+    done
+    if ((${#bad[@]})); then
+        warn "Imports from $exe:"
+        echo "$imports" >&2 || true
+        die "$exe still depends on MinGW DLLs (${bad[*]}). Rebuild with fully static link (-static)."
+    fi
+    log "$exe has no MinGW runtime DLL imports (OK for distributing without DLLs)"
+}
+
 install_host_packages() {
     local mingw_pkg_arch="$TARGET_ARCH"
     [[ "$TARGET_ARCH" == "x86_64" ]] && mingw_pkg_arch="x86-64"
@@ -729,6 +754,7 @@ build_cli() {
     cp -f "$ROOT/src/RNRCd.exe" "$RELEASE_DIR/"
     "${TARGET}-strip" "$RELEASE_DIR/RNRCd.exe" 2>/dev/null || true
     file "$RELEASE_DIR/RNRCd.exe" || true
+    verify_no_mingw_runtime_dlls "$RELEASE_DIR/RNRCd.exe"
 }
 
 build_gui() {
@@ -770,6 +796,8 @@ build_gui() {
         "BDB_LIB_PATH=${DEPS}/lib"
         "OPENSSL_INCLUDE_PATH=${DEPS}/include"
         "OPENSSL_LIB_PATH=${DEPS}/lib"
+        # Ensure MinGW runtime (winpthread) is linked statically even if .pro is outdated
+        "QMAKE_LFLAGS+=-static"
     )
 
     # When using our own Qt (not MXE wrappers), force mingw compilers
@@ -817,6 +845,7 @@ build_gui() {
         "${MXE_PREFIX}/usr/bin/${MXE_TARGET}-strip" "$RELEASE_DIR/RNRC-qt.exe" 2>/dev/null || true
     fi
     file "$RELEASE_DIR/RNRC-qt.exe" || true
+    verify_no_mingw_runtime_dlls "$RELEASE_DIR/RNRC-qt.exe"
 }
 
 main() {
