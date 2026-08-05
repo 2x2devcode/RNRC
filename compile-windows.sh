@@ -508,20 +508,47 @@ build_qt_from_source() {
     mkdir -p qt-build
     cd qt-build
 
-    # Minimal static Qt for wallet GUI (widgets + network)
+    # Minimal static Qt for wallet GUI (widgets + network).
+    # On Windows use Schannel for Qt Network SSL — do NOT use -openssl-linked.
+    # Wallet crypto still links OpenSSL separately via RNRC-qt.pro (-lssl -lcrypto).
+    # OPENSSL_PREFIX alone fails Qt's libs.openssl test for static mingw + OpenSSL 3.
+    local qt_ssl_args=()
+    if [[ "${QT_USE_OPENSSL:-0}" == "1" ]]; then
+        [[ -f "$DEPS/include/openssl/ssl.h" ]] || die "OpenSSL headers missing under $DEPS/include"
+        [[ -f "$DEPS/lib/libssl.a" && -f "$DEPS/lib/libcrypto.a" ]] || die "OpenSSL static libs missing under $DEPS/lib"
+        qt_ssl_args=(
+            -openssl-linked
+            "OPENSSL_INCDIR=$DEPS/include"
+            "OPENSSL_LIBDIR=$DEPS/lib"
+            "OPENSSL_LIBS=-lssl -lcrypto -lcrypt32 -lws2_32 -lgdi32 -luser32 -ladvapi32"
+        )
+        log "Configuring Qt with linked OpenSSL from $DEPS"
+    else
+        qt_ssl_args=(-schannel -no-openssl)
+        log "Configuring Qt with Windows Schannel (set QT_USE_OPENSSL=1 to link OpenSSL into Qt)"
+    fi
+
     "../qtbase-everywhere-src-${QT_VER}/configure" \
         -prefix "$DEPS/qt" \
         -release -static -opensource -confirm-license \
         -xplatform win32-g++ \
         -device-option "CROSS_COMPILE=${TARGET}-" \
-        -nomake examples -nomake tests \
-        -no-opengl -no-cups -no-pch \
+        -nomake examples -nomake tests -nomake tools \
+        -no-opengl -no-cups -no-pch -no-dbus -no-icu \
         -no-feature-sql -no-feature-testlib \
         -qt-zlib -qt-libpng -qt-libjpeg -qt-freetype -qt-pcre -qt-harfbuzz \
-        -skip qt3d -skip qtactiveqt -skip qtandroidextras -skip qtcanvas3d \
-        -openssl-linked OPENSSL_PREFIX="$DEPS" \
+        "${qt_ssl_args[@]}" \
         -I "$DEPS/include" -L "$DEPS/lib" \
         -verbose
+
+    # Fail early with a clear message if openssl was requested but not detected
+    if [[ "${QT_USE_OPENSSL:-0}" == "1" && -f config.summary ]]; then
+        if ! grep -E '[[:space:]]OpenSSL[[:space:].]+yes' config.summary >/dev/null; then
+            warn "Qt config.summary SSL lines:"
+            grep -E 'OpenSSL|Schannel' config.summary || true
+            die "Qt failed to detect OpenSSL (libs.openssl). Use QT_USE_OPENSSL=0 (Schannel) or fix DEPS OpenSSL."
+        fi
+    fi
 
     make -j"$JOBS"
     make install

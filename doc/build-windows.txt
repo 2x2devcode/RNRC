@@ -24,11 +24,12 @@ Optional environment variables:
   TARGET_ARCH=i686         # 32-bit Windows
   QT_MINGW_QMAKE=/path     # force a specific mingw qmake
   QT_VER=5.15.2            # qtbase version when building from source
+  QT_USE_OPENSSL=1         # link OpenSSL into Qt (default: Schannel)
   JOBS=4                   # parallel build jobs
   DEPS_DIR=/path/to/deps   # override depends prefix
 
-Qt from source (GCC 11+)
-------------------------
+Qt from source (GCC 11+ / SSL)
+------------------------------
 
 If MXE Qt is unavailable, the script builds qtbase from source. Qt 5.15.2
 fails on GCC 11+ with:
@@ -39,18 +40,23 @@ fails on GCC 11+ with:
 The script applies `patches/qtbase-5.15.2-gcc11-limits.diff` (and verifies
 `#include <limits>` in qfloat16.h) before configure.
 
-IMPORTANT: this fix must be on the tree you build (`git pull` on master, or
-merge PR). Re-running an old `compile-windows.sh` without the patch will fail
-the same way.
+By default Qt Network uses Windows **Schannel** (`-schannel -no-openssl`).
+That avoids Qt configure failing with:
 
-After a failed Qt build, clean and re-run:
+  ERROR: Feature 'openssl-linked' was enabled, but the pre-condition
+  '... libs.openssl' failed.
+
+Wallet crypto still links OpenSSL via `RNRC-qt.pro` (`-lssl -lcrypto`).
+Set `QT_USE_OPENSSL=1` only if you need OpenSSL inside Qt itself.
+
+After a failed Qt configure/build, clean and re-run:
 
     git pull origin master
     rm -rf depends/x86_64-w64-mingw32/{qt,src/qt-build,src/qtbase-everywhere-src-*,.qt.ok}
     # keep the .tar.xz download if present
     ./compile-windows.sh
 
-Emergency in-place patch (if you cannot re-extract yet):
+Emergency in-place GCC11 patch (if you cannot re-extract yet):
 
     cd depends/x86_64-w64-mingw32/src/qtbase-everywhere-src-5.15.2
     patch -p1 < ../../../../patches/qtbase-5.15.2-gcc11-limits.diff
