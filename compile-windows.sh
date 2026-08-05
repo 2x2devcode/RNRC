@@ -356,13 +356,17 @@ build_gui() {
 main() {
     check_ubuntu
 
+    local mingw_pkg_arch="$TARGET_ARCH"
+    # Debian/Ubuntu package names use x86-64 (hyphen), not x86_64
+    [[ "$TARGET_ARCH" == "x86_64" ]] && mingw_pkg_arch="x86-64"
+
     local pkgs=(
         build-essential curl wget git ca-certificates
         autoconf automake libtool pkg-config cmake unzip zip
         python3
         mingw-w64
-        g++-mingw-w64-${TARGET_ARCH}
-        gcc-mingw-w64-${TARGET_ARCH}
+        "g++-mingw-w64-${mingw_pkg_arch}"
+        "gcc-mingw-w64-${mingw_pkg_arch}"
     )
     if need_cmd apt-get; then
         apt_install "${pkgs[@]}"
