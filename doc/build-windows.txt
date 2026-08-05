@@ -23,8 +23,24 @@ Optional environment variables:
   BUILD_GUI=0              # CLI only
   TARGET_ARCH=i686         # 32-bit Windows
   QT_MINGW_QMAKE=/path     # force a specific mingw qmake
+  QT_VER=5.15.2            # qtbase version when building from source
   JOBS=4                   # parallel build jobs
   DEPS_DIR=/path/to/deps   # override depends prefix
+
+Qt from source (GCC 11+)
+------------------------
+
+If MXE Qt is unavailable, the script builds qtbase from source. Qt 5.15.2
+fails on GCC 11+ with:
+
+  error: 'numeric_limits' is not a class template
+  (in qfloat16.h / qendian.h)
+
+The script patches those headers with `#include <limits>` before configure.
+After a failed Qt build, clean and re-run:
+
+    rm -rf depends/x86_64-w64-mingw32/{qt,src/qt-build,src/qtbase-everywhere-src-*,.qt.ok}
+    ./compile-windows.sh
 
 
 Manual step-by-step (equivalent to the script)

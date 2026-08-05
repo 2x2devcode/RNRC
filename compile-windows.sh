@@ -416,6 +416,44 @@ install_mxe_qt() {
     return 1
 }
 
+# Qt 5.15.2 (and some later 5.15.x) break on GCC 11+ because <limits> is no
+# longer pulled in transitively. Without it, specializing std::numeric_limits
+# yields: "'numeric_limits' is not a class template" in qfloat16.h / qendian.h.
+patch_qtbase_for_gcc11() {
+    local src="$1"
+    local f
+    log "Applying GCC 11+ Qt patches (#include <limits>) under $src"
+
+    ensure_include_limits() {
+        local file="$1"
+        [[ -f "$file" ]] || return 0
+        if grep -qE '^[[:space:]]*#include[[:space:]]*<limits>' "$file"; then
+            return 0
+        fi
+        if grep -q '#include <QtCore/qglobal.h>' "$file"; then
+            # Insert immediately after qglobal.h (canonical Qt fix)
+            sed -i '/#include <QtCore\/qglobal.h>/a #include <limits>' "$file"
+        elif grep -q '#include <limits.h>' "$file"; then
+            sed -i '/#include <limits.h>/a #include <limits>' "$file"
+        else
+            # Fallback: after the include guard / first #include
+            sed -i '0,/#include /s//#include <limits>\n&/' "$file"
+        fi
+        grep -qE '^[[:space:]]*#include[[:space:]]*<limits>' "$file" \
+            || die "Failed to patch $file with #include <limits>"
+        log "  patched $(basename "$file")"
+    }
+
+    for f in \
+        "$src/src/corelib/global/qfloat16.h" \
+        "$src/src/corelib/global/qendian.h" \
+        "$src/src/corelib/text/qbytearraymatcher.h" \
+        "$src/src/corelib/tools/qoffsetstringarray_p.h"
+    do
+        ensure_include_limits "$f"
+    done
+}
+
 build_qt_from_source() {
     local marker="$DEPS/.qt.ok"
     [[ -f "$marker" && -x "$DEPS/qt/bin/qmake" ]] && {
@@ -433,7 +471,10 @@ build_qt_from_source() {
         || download "https://ftp.fau.de/qtproject/archive/qt/5.15/${QT_VER}/submodules/${qt_tb}" "$qt_tb"
 
     rm -rf "qtbase-everywhere-src-${QT_VER}" "qt-build"
+    # Drop any incomplete prior install so a failed GCC11 build cannot be reused
+    rm -rf "$DEPS/qt" "$marker"
     tar xf "$qt_tb"
+    patch_qtbase_for_gcc11 "$SRC_DEPS/qtbase-everywhere-src-${QT_VER}"
     mkdir -p qt-build
     cd qt-build
 
