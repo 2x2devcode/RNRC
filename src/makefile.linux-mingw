@@ -22,28 +22,28 @@ INCLUDEPATHS= \
  -I"$(CURDIR)" \
  -I"$(CURDIR)/obj" \
  -I"$(DEPSDIR)/include" \
- -I"$(DEPSDIR)/include/boost" \
  -I"$(DEPSDIR)"
 
 LIBPATHS= \
  -L"$(DEPSDIR)/lib"
 
-BOOST_LIB_SUFFIX?=-mt-x64
+# Boost 1.7x+ with layout=tagged often names the thread lib without _win32
+BOOST_THREAD_LIB?=boost_thread
+BOOST_LIB_SUFFIX?=-mt-s-x64
 ifeq ($(TARGET_PLATFORM),i686)
-BOOST_LIB_SUFFIX:=-mt-x32
+BOOST_LIB_SUFFIX:=-mt-s-x32
 endif
 
 LIBS= \
- -l boost_system$(BOOST_LIB_SUFFIX) \
- -l boost_filesystem$(BOOST_LIB_SUFFIX) \
- -l boost_program_options$(BOOST_LIB_SUFFIX) \
- -l boost_thread_win32$(BOOST_LIB_SUFFIX) \
- -l boost_chrono$(BOOST_LIB_SUFFIX) \
- -l db_cxx \
- -l ssl \
- -l crypto \
- -l z
-
+ -lboost_system$(BOOST_LIB_SUFFIX) \
+ -lboost_filesystem$(BOOST_LIB_SUFFIX) \
+ -lboost_program_options$(BOOST_LIB_SUFFIX) \
+ -l$(BOOST_THREAD_LIB)$(BOOST_LIB_SUFFIX) \
+ -lboost_chrono$(BOOST_LIB_SUFFIX) \
+ -ldb_cxx \
+ -lssl \
+ -lcrypto \
+ -lz
 DEFS=-D_MT -DWIN32 -D_WINDOWS -DBOOST_THREAD_USE_LIB -DBOOST_SPIRIT_THREADSAFE -DBOOST_BIND_GLOBAL_PLACEHOLDERS
 DEBUGFLAGS=
 CFLAGS=-O2 -std=c++17 -msse2 -Wall -Wextra -Wno-ignored-qualifiers -Wformat -Wformat-security -Wno-unused-parameter -Wno-deprecated-declarations -Wno-deprecated-copy $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)

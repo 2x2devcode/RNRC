@@ -72,7 +72,7 @@ Manual step-by-step (equivalent to the script)
     ./bootstrap.sh
     ./b2 --user-config=user-config.jam toolset=gcc target-os=windows \
         threadapi=win32 threading=multi variant=release link=static \
-        runtime-link=static address-model=64 --layout=tagged \
+        runtime-link=static address-model=64 --layout=tagged runtime-link=static \
         --prefix="$DEPS" --with-system --with-filesystem \
         --with-program_options --with-thread --with-chrono \
         -j$(nproc) install
@@ -106,7 +106,7 @@ Manual step-by-step (equivalent to the script)
 
     qmake -spec win32-g++ \
         "USE_UPNP=-" "USE_QRCODE=0" "RELEASE=1" \
-        "BOOST_LIB_SUFFIX=-mt-x64" \
+        "BOOST_LIB_SUFFIX=-mt-s-x64" \
         "BOOST_INCLUDE_PATH=$DEPS/include" \
         "BOOST_LIB_PATH=$DEPS/lib" \
         "BDB_INCLUDE_PATH=$DEPS/include" \

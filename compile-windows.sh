@@ -13,7 +13,7 @@ SRC_DEPS="$DEPS/src"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 2)}"
 RELEASE_DIR="$ROOT/release/windows"
 BUILD_GUI="${BUILD_GUI:-1}"
-USE_UPNP="${USE_UPNP:-0}"
+USE_UPNP="${USE_UPNP:--}"
 
 OPENSSL_VER="${OPENSSL_VER:-3.0.13}"
 BOOST_VER="${BOOST_VER:-1.82.0}"
@@ -108,8 +108,8 @@ build_zlib() {
     [[ -f "$marker" ]] && { log "zlib already built"; return 0; }
     mkdir -p "$SRC_DEPS"
     cd "$SRC_DEPS"
-    download "https://zlib.net/zlib-${ZLIB_VER}.tar.gz" "zlib-${ZLIB_VER}.tar.gz" \
-        || download "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz" "zlib-${ZLIB_VER}.tar.gz"
+    download "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz" "zlib-${ZLIB_VER}.tar.gz" \
+        || download "https://zlib.net/zlib-${ZLIB_VER}.tar.gz" "zlib-${ZLIB_VER}.tar.gz"
     rm -rf "zlib-${ZLIB_VER}"
     tar xzf "zlib-${ZLIB_VER}.tar.gz"
     cd "zlib-${ZLIB_VER}"
@@ -134,9 +134,15 @@ build_openssl() {
     [[ "$TARGET_ARCH" == "i686" ]] && conf="mingw"
     ./Configure "$conf" no-shared no-tests no-module \
         --cross-compile-prefix="${TARGET}-" \
-        --prefix="$DEPS" --openssldir="$DEPS/ssl"
+        --prefix="$DEPS" --libdir=lib --openssldir="$DEPS/ssl"
     make -j"$JOBS"
     make install_sw
+    # Some OpenSSL builds still drop libs in lib64 — normalize to lib/
+    if [[ -f "$DEPS/lib64/libssl.a" && ! -f "$DEPS/lib/libssl.a" ]]; then
+        mkdir -p "$DEPS/lib"
+        cp -a "$DEPS/lib64/"*.a "$DEPS/lib/" 2>/dev/null || true
+    fi
+    verify_file "$DEPS/lib/libssl.a" "OpenSSL install did not produce libssl.a"
     touch "$marker"
 }
 
@@ -241,13 +247,24 @@ build_miniupnpc() {
     fi
     mkdir -p "$DEPS/include/miniupnpc" "$DEPS/lib"
     find . -name 'libminiupnpc.a' -exec cp {} "$DEPS/lib/" \;
+    # Prefer packaged include/ layout (miniupnpc 2.x)
+    if [[ -d include ]]; then
+        cp -a include/*.h "$DEPS/include/miniupnpc/" 2>/dev/null || true
+        cp -a include/miniupnpc/*.h "$DEPS/include/miniupnpc/" 2>/dev/null || true
+    fi
     find . -path '*/miniupnpc/*.h' -exec cp {} "$DEPS/include/miniupnpc/" \;
     cp *.h "$DEPS/include/miniupnpc/" 2>/dev/null || true
+    verify_file "$DEPS/include/miniupnpc/miniupnpc.h" "miniupnpc headers"
     touch "$marker"
 }
 
 check_deps_links() {
     log "Verifying dependency headers and libraries under $DEPS"
+    # Normalize OpenSSL lib64 -> lib if needed
+    if [[ -f "$DEPS/lib64/libssl.a" && ! -f "$DEPS/lib/libssl.a" ]]; then
+        mkdir -p "$DEPS/lib"
+        cp -a "$DEPS/lib64/"*.a "$DEPS/lib/" 2>/dev/null || true
+    fi
     verify_file "$DEPS/include/openssl/ssl.h" "OpenSSL headers"
     verify_file "$DEPS/lib/libssl.a" "OpenSSL libssl"
     verify_file "$DEPS/lib/libcrypto.a" "OpenSSL libcrypto"
@@ -264,11 +281,20 @@ check_deps_links() {
     boost_sys="$(find "$DEPS/lib" -name 'libboost_system*.a' | head -1 || true)"
     [[ -n "$boost_sys" ]] || die "Boost system library not found in $DEPS/lib"
     log "Found Boost: $(basename "$boost_sys")"
-    # Detect BOOST_LIB_SUFFIX from filename: libboost_system-mt-x64.a -> -mt-x64
+    # Detect BOOST_LIB_SUFFIX from filename: libboost_system-mt-s-x64.a -> -mt-s-x64
     local base
     base="$(basename "$boost_sys" .a)"
     export BOOST_LIB_SUFFIX="${base#libboost_system}"
     log "Using BOOST_LIB_SUFFIX=${BOOST_LIB_SUFFIX}"
+    # Detect thread library name (boost_thread vs boost_thread_win32)
+    if [[ -f "$DEPS/lib/libboost_thread_win32${BOOST_LIB_SUFFIX}.a" ]]; then
+        export BOOST_THREAD_LIB=boost_thread_win32
+    elif [[ -f "$DEPS/lib/libboost_thread${BOOST_LIB_SUFFIX}.a" ]]; then
+        export BOOST_THREAD_LIB=boost_thread
+    else
+        die "Boost thread library not found (suffix ${BOOST_LIB_SUFFIX})"
+    fi
+    log "Using BOOST_THREAD_LIB=${BOOST_THREAD_LIB}"
 }
 
 build_cli() {
@@ -282,6 +308,7 @@ build_cli() {
         TARGET_PLATFORM="$TARGET_ARCH" \
         DEPSDIR="$DEPS" \
         BOOST_LIB_SUFFIX="$BOOST_LIB_SUFFIX" \
+        BOOST_THREAD_LIB="$BOOST_THREAD_LIB" \
         USE_UPNP="$USE_UPNP"
     verify_file "$ROOT/src/RNRCd.exe" "CLI build failed"
     mkdir -p "$RELEASE_DIR"
