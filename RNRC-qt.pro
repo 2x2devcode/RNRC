@@ -137,6 +137,13 @@ contains(USE_O3, 1) {
 }
 
 QMAKE_CXXFLAGS_WARN_ON = -fdiagnostics-show-option -Wall -Wextra -Wno-ignored-qualifiers -Wformat -Wformat-security -Wno-unused-parameter -Wstack-protector
+# MinGW + C++11: "%"PRIx64 without a space triggers -Wliteral-suffix; older
+# toolchains also emit -Wformat-extra-args for MSVCRT-style I64 macros.
+win32:QMAKE_CXXFLAGS_WARN_ON += -Wno-literal-suffix -Wno-format-extra-args
+win32:QMAKE_CXXFLAGS += -Wno-literal-suffix -Wno-format-extra-args
+
+# Static Qt needs the Windows QPA plugin linked in
+windows:QTPLUGIN += qwindows
 
 # Input
 DEPENDPATH += src src/json src/qt
@@ -389,6 +396,7 @@ isEmpty(BOOST_INCLUDE_PATH) {
 }
 
 windows:DEFINES += WIN32
+windows:DEFINES += __USE_MINGW_ANSI_STDIO=1
 windows:RC_FILE = src/qt/res/bitcoin-qt.rc
 
 windows:!contains(MINGW_THREAD_BUGFIX, 0) {
@@ -418,6 +426,8 @@ LIBS += $$join(BOOST_LIB_PATH,,-L,) $$join(BDB_LIB_PATH,,-L,) $$join(OPENSSL_LIB
 LIBS += -lssl -lcrypto -ldb_cxx$$BDB_LIB_SUFFIX
 # -lgdi32 has to happen after -lcrypto (see  #681)
 windows:LIBS += -lws2_32 -lshlwapi -lmswsock -lole32 -loleaut32 -luuid -lgdi32 -lpthread
+# Static Qt (Schannel / platform plugin) often needs these beyond the defaults
+windows:LIBS += -lcrypt32 -lsecur32 -lbcrypt -lwinmm -lversion -lnetapi32 -luserenv -ldwmapi -luxtheme -lcomdlg32 -lwinspool -limm32
 LIBS += -lboost_system$$BOOST_LIB_SUFFIX -lboost_filesystem$$BOOST_LIB_SUFFIX -lboost_program_options$$BOOST_LIB_SUFFIX -lboost_thread$$BOOST_THREAD_LIB_SUFFIX -lboost_chrono$$BOOST_LIB_SUFFIX
 
 contains(RELEASE, 1) {

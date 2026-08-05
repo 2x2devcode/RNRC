@@ -681,7 +681,17 @@ build_gui() {
     fi
 
     "$qmake_bin" "${qmake_args[@]}" "$ROOT/RNRC-qt.pro"
-    make -j"$JOBS"
+
+    local makelog="$bdir/build.log"
+    set +e
+    make -j"$JOBS" 2>&1 | tee "$makelog"
+    local make_rc=${PIPESTATUS[0]}
+    set -e
+    if [[ "$make_rc" -ne 0 ]]; then
+        warn "GUI make failed (exit $make_rc). Last errors from $makelog:"
+        grep -E 'error:|undefined reference|collect2:|fatal error:' "$makelog" | tail -n 80 >&2 || true
+        die "Windows GUI build failed — see $makelog"
+    fi
 
     local exe
     exe="$(find "$bdir" -name 'RNRC-qt.exe' | head -1 || true)"

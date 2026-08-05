@@ -29,6 +29,12 @@
 
 #include "netbase.h" // for AddTimeData
 
+// Prefer C99 printf on MinGW (llx) so -Wformat matches runtime (__mingw_printf).
+// Do this before inttypes.h; MSVC keeps the I64* forms below.
+#if defined(__MINGW32__) && !defined(__USE_MINGW_ANSI_STDIO)
+#define __USE_MINGW_ANSI_STDIO 1
+#endif
+
 // to obtain PRId64 on some old systems
 #define __STDC_FORMAT_MACROS 1
 
@@ -49,16 +55,19 @@ static const int64_t CENT = COIN/100;
 #define UINTBEGIN(a)        ((uint32_t*)&(a))
 #define CUINTBEGIN(a)        ((const uint32_t*)&(a))
 
-#ifndef PRId64		
-#if defined(_MSC_VER) || defined(__MSVCRT__)		
-#define PRId64  "I64d"		
-#define PRIu64  "I64u"		
-#define PRIx64  "I64x"		
-#else		
-#define PRId64  "lld"		
-#define PRIu64  "llu"		
-#define PRIx64  "llx"		
-#endif		
+/* Force consistent 64-bit printf macros. MinGW's inttypes.h may expose I64*
+ * (MSVCRT style) which GCC's -Wformat / gnu_printf rejects as extra args. */
+#undef PRId64
+#undef PRIu64
+#undef PRIx64
+#if defined(_MSC_VER)
+#define PRId64  "I64d"
+#define PRIu64  "I64u"
+#define PRIx64  "I64x"
+#else
+#define PRId64  "lld"
+#define PRIu64  "llu"
+#define PRIx64  "llx"
 #endif
 
 #ifndef THROW_WITH_STACKTRACE
@@ -71,7 +80,7 @@ void LogStackTrace();
 #endif
 
 /* Format characters for (s)size_t and ptrdiff_t */
-#if defined(_MSC_VER) || defined(__MSVCRT__)
+#if defined(_MSC_VER)
   /* (s)size_t and ptrdiff_t have the same size specifier in MSVC:
      http://msdn.microsoft.com/en-us/library/tcxf1dw6%28v=vs.100%29.aspx
    */
@@ -81,7 +90,7 @@ void LogStackTrace();
   #define PRIpdx    "Ix"
   #define PRIpdu    "Iu"
   #define PRIpdd    "Id"
-#else /* C99 standard */
+#else /* C99 / MinGW ANSI stdio */
   #define PRIszx    "zx"
   #define PRIszu    "zu"
   #define PRIszd    "zd"
@@ -133,7 +142,11 @@ inline void MilliSleep(int64_t n)
  * Parameters count from 1.
  */
 #ifdef __GNUC__
+#if defined(__MINGW32__)
+#define ATTR_WARN_PRINTF(X,Y) __attribute__((format(gnu_printf,X,Y)))
+#else
 #define ATTR_WARN_PRINTF(X,Y) __attribute__((format(printf,X,Y)))
+#endif
 #else
 #define ATTR_WARN_PRINTF(X,Y)
 #endif

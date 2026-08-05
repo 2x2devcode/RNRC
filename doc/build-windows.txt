@@ -185,6 +185,10 @@ Verification checklist
 
  file src/RNRCd.exe should report PE32+ executable (x86-64) for Windows.
 
+If the GUI `make` fails, check `build-win-qt/build.log` for `error:` /
+`undefined reference` lines. A lone `-Wformat-extra-args` warning on
+`main.h` is not fatal by itself after the MinGW PRI macro fix in util.h.
+
 32-bit (i686) builds
 --------------------
 

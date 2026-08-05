@@ -44,9 +44,9 @@ LIBS= \
  -lssl \
  -lcrypto \
  -lz
-DEFS=-D_MT -DWIN32 -D_WINDOWS -DBOOST_THREAD_USE_LIB -DBOOST_SPIRIT_THREADSAFE -DBOOST_BIND_GLOBAL_PLACEHOLDERS
+DEFS=-D_MT -DWIN32 -D_WINDOWS -DBOOST_THREAD_USE_LIB -DBOOST_SPIRIT_THREADSAFE -DBOOST_BIND_GLOBAL_PLACEHOLDERS -D__USE_MINGW_ANSI_STDIO=1
 DEBUGFLAGS=
-CFLAGS=-O2 -std=c++17 -msse2 -Wall -Wextra -Wno-ignored-qualifiers -Wformat -Wformat-security -Wno-unused-parameter -Wno-deprecated-declarations -Wno-deprecated-copy $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
+CFLAGS=-O2 -std=c++17 -msse2 -Wall -Wextra -Wno-ignored-qualifiers -Wformat -Wformat-security -Wno-unused-parameter -Wno-deprecated-declarations -Wno-deprecated-copy -Wno-literal-suffix -Wno-format-extra-args $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
 LDFLAGS=-Wl,--dynamicbase -Wl,--nxcompat -static -static-libgcc -static-libstdc++
 
 ifndef USE_UPNP
