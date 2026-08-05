@@ -428,10 +428,8 @@ LIBS += $$join(BOOST_LIB_PATH,,-L,) $$join(BDB_LIB_PATH,,-L,) $$join(OPENSSL_LIB
 LIBS += -lssl -lcrypto -ldb_cxx$$BDB_LIB_SUFFIX
 # -lgdi32 has to happen after -lcrypto (see  #681)
 windows:LIBS += -lws2_32 -lshlwapi -lmswsock -lole32 -loleaut32 -luuid -lgdi32
-# Force static winpthread (avoids libwinpthread-1.dll at runtime)
-windows:LIBS += -Wl,-Bstatic -lpthread -Wl,-Bdynamic
 # Static Qt (Schannel / platform plugin) often needs these beyond the defaults
-windows:LIBS += -lcrypt32 -lsecur32 -lbcrypt -lwinmm -lversion -lnetapi32 -luserenv -ldwmapi -luxtheme -lcomdlg32 -lwinspool -limm32
+windows:LIBS += -lcrypt32 -lsecur32 -lbcrypt -lwinmm -lversion -lnetapi32 -luserenv -ldwmapi -luxtheme -lcomdlg32 -lwinspool -limm32 -lwtsapi32
 LIBS += -lboost_system$$BOOST_LIB_SUFFIX -lboost_filesystem$$BOOST_LIB_SUFFIX -lboost_program_options$$BOOST_LIB_SUFFIX -lboost_thread$$BOOST_THREAD_LIB_SUFFIX -lboost_chrono$$BOOST_LIB_SUFFIX
 
 contains(RELEASE, 1) {
@@ -445,5 +443,9 @@ contains(RELEASE, 1) {
     DEFINES += LINUX
     LIBS += -lrt -ldl
 }
+
+# MUST be last on the link line. An earlier -Wl,-Bdynamic (or the g++ driver
+# default) would pull shared libstdc++-6.dll / libwinpthread-1.dll.
+win32:LIBS += -Wl,-Bstatic -lstdc++ -lwinpthread -lpthread -lgcc_eh -lgcc
 
 system($$QMAKE_LRELEASE -silent $$_PRO_FILE_)

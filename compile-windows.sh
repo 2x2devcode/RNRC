@@ -796,8 +796,9 @@ build_gui() {
         "BDB_LIB_PATH=${DEPS}/lib"
         "OPENSSL_INCLUDE_PATH=${DEPS}/include"
         "OPENSSL_LIB_PATH=${DEPS}/lib"
-        # Ensure MinGW runtime (winpthread) is linked statically even if .pro is outdated
-        "QMAKE_LFLAGS+=-static"
+        # Force fully static MinGW runtime (no libstdc++-6.dll / libwinpthread-1.dll)
+        "QMAKE_LFLAGS+=-static -static-libgcc -static-libstdc++"
+        "LIBS+=-Wl,-Bstatic -lstdc++ -lwinpthread -lpthread -lgcc_eh -lgcc"
     )
 
     # When using our own Qt (not MXE wrappers), force mingw compilers
