@@ -1,9 +1,16 @@
 Building RNRC
 
-See doc/readme-qt.rst for instructions on building RNRC QT,
-the intended-for-end-users, nice-graphical-interface, reference
-implementation of RNRC.
+Native Linux (Ubuntu 22.04 / 24.04 / 26.04)
+------------------------------------------
+See doc/build-unix.txt
 
-See doc/build-*.txt for instructions on building RNRCd,
-the intended-for-services, no-graphical-interface, reference
-implementation of RNRC.
+  cd src && make -f makefile.unix        # RNRCd (CLI)
+  qmake && make                          # RNRC-qt (GUI) from repo root
+
+Windows cross-compile from Ubuntu 22.04
+---------------------------------------
+See doc/build-windows.txt
+
+  ./compile-windows.sh                   # RNRCd.exe + RNRC-qt.exe (if mingw Qt present)
+
+See also doc/readme-qt.rst for GUI qmake options.

@@ -1,153 +1,73 @@
-Copyright (c) 2009-2012 Bitcoin Developers
-Distributed under the MIT/X11 software license, see the accompanying
-file license.txt or http://www.opensource.org/licenses/mit-license.php.
-This product includes software developed by the OpenSSL Project for use in
-the OpenSSL Toolkit (http://www.openssl.org/).  This product includes
-cryptographic software written by Eric Young (eay@cryptsoft.com) and UPnP
-software written by Thomas Bernard.
+UNIX BUILD NOTES (Ubuntu 22.04 / 24.04 / 26.04)
+================================================
 
+These notes update the legacy build instructions for modern Ubuntu
+toolchains (GCC 11–13+, OpenSSL 3.x, Boost 1.74+, Qt 5.15).
 
-UNIX BUILD NOTES
-================
+To Build (daemon / CLI)
+-----------------------
 
-To Build
---------
+    sudo apt-get update
+    sudo apt-get install -y build-essential libssl-dev libboost-all-dev \
+        libdb++-dev libminiupnpc-dev libqrencode-dev
 
-cd src/
-make -f makefile.unix            # Headless RNRC
+    cd src/
+    make -f makefile.unix -j$(nproc)    # produces RNRCd
+    strip RNRCd
 
-See readme-qt.rst for instructions on building RNRC QT,
-the graphical RNRC.
+To Build (Qt GUI)
+-----------------
+
+    sudo apt-get install -y qtbase5-dev qtbase5-dev-tools qttools5-dev-tools \
+        libqt5gui5 libqt5core5a libqt5dbus5 libqrencode-dev
+
+    # From repository root:
+    qmake "USE_UPNP=-" "USE_QRCODE=1"
+    make -j$(nproc)                     # produces RNRC-qt
+
+Notes for Ubuntu 22.04+
+-----------------------
+
+ * Package `qt5-default` was removed; install `qtbase5-dev` instead.
+ * OpenSSL 3.x is used by default; the tree was updated for opaque BIGNUM /
+   EVP_CIPHER_CTX / ECDSA_SIG APIs.
+ * Boost.Filesystem `is_complete()` / `system_complete()` were replaced with
+   `is_absolute()` / `absolute()`.
+ * Build uses `-std=c++17` and links `libboost_chrono`.
+ * Optional UPnP: `make -f makefile.unix USE_UPNP=1` (requires libminiupnpc-dev).
+ * Optional QR codes (GUI): `qmake "USE_QRCODE=1"`.
 
 Dependencies
 ------------
 
  Library     Purpose           Description
  -------     -------           -----------
- libssl      SSL Support       Secure communications
+ libssl      SSL Support       Secure communications (OpenSSL 1.1+/3.x)
  libdb       Berkeley DB       Blockchain & wallet storage
- libboost    Boost             C++ Library
+ libboost    Boost             C++ Library (system, filesystem, thread, chrono, ...)
  miniupnpc   UPnP Support      Optional firewall-jumping support
- libqrencode QRCode generation Optional QRCode generation
+ libqrencode QRCode generation Optional QRCode generation (GUI)
+ Qt5         GUI               Widgets / DBus for RNRC-qt
 
-Note that libexecinfo should be installed, if you building under *BSD systems. 
-This library provides backtrace facility.
+Versions typically provided by Ubuntu packages:
 
-miniupnpc may be used for UPnP port mapping.  It can be downloaded from
-http://miniupnp.tuxfamily.org/files/.  UPnP support is compiled in and
-turned off by default.  Set USE_UPNP to a different value to control this:
- USE_UPNP=-    No UPnP support - miniupnp not required
- USE_UPNP=0    (the default) UPnP support turned off by default at runtime
- USE_UPNP=1    UPnP support turned on by default at runtime
+ Ubuntu 22.04  — GCC 11, OpenSSL 3.0, Boost ~1.74, Berkeley DB 5.3, Qt 5.15
+ Ubuntu 24.04  — GCC 13, OpenSSL 3.0, Boost ~1.83, Berkeley DB 5.3, Qt 5.15
+ Ubuntu 26.04  — same class of APIs; use the same package names above
 
-libqrencode may be used for QRCode image generation. It can be downloaded
-from http://fukuchi.org/works/qrencode/index.html.en, or installed via
-your package manager. Set USE_QRCODE to control this:
- USE_QRCODE=0   (the default) No QRCode support - libqrcode not required
- USE_QRCODE=1   QRCode support enabled
+miniupnpc may be used for UPnP port mapping. UPnP support is compiled in and
+turned off by default when USE_UPNP=0. Set USE_UPNP to control this:
 
-Licenses of statically linked libraries:
- Berkeley DB   New BSD license with additional requirement that linked
-               software must be free open source
- Boost         MIT-like license
- miniupnpc     New (3-clause) BSD license
+ USE_UPNP=-    No UPnP support - miniupnpc not required
+ USE_UPNP=0    (makefile.unix default) UPnP support off by default at runtime
+ USE_UPNP=1    UPnP support on by default at runtime
 
-Versions used in this release:
- GCC           4.9.0
- OpenSSL       1.0.1g
- Berkeley DB   5.3.28.NC
- Boost         1.55.0
- miniupnpc     1.9.20140401
+Security hardening flags (stack protector, RELRO, FORTIFY) remain enabled in
+makefile.unix. See historical notes below for PIE testing with scanelf.
 
-Dependency Build Instructions: Ubuntu & Debian
-----------------------------------------------
-sudo apt-get install build-essential
-sudo apt-get install libssl-dev
-sudo apt-get install libdb++-dev
-sudo apt-get install libboost-all-dev
-sudo apt-get install libqrencode-dev
-
-If using Boost 1.37, append -mt to the boost libraries in the makefile.
-
-
-Dependency Build Instructions: Gentoo
--------------------------------------
-
-emerge -av1 --noreplace boost openssl sys-libs/db
-
-Take the following steps to build (no UPnP support):
- cd ${RNRC_DIR}/src
- make -f makefile.unix USE_UPNP=
- strip RNRCd
-
-
-Notes
------
-The release is built with GCC and then "strip RNRCd" to strip the debug
-symbols, which reduces the executable size by about 90%.
-
-
-miniupnpc
----------
-tar -xzvf miniupnpc-1.6.tar.gz
-cd miniupnpc-1.6
-make
-sudo su
-make install
-
-
-Berkeley DB
------------
-You need Berkeley DB. If you have to build Berkeley DB yourself:
-../dist/configure --enable-cxx
-make
-
-
-Boost
------
-If you need to build Boost yourself:
-sudo su
-./bootstrap.sh
-./bjam install
-
-
-Security
+See also
 --------
-To help make your RNRC installation more secure by making certain attacks impossible to
-exploit even if a vulnerability is found, you can take the following measures:
 
-* Position Independent Executable
-    Build position independent code to take advantage of Address Space Layout Randomization
-    offered by some kernels. An attacker who is able to cause execution of code at an arbitrary
-    memory location is thwarted if he doesn't know where anything useful is located.
-    The stack and heap are randomly located by default but this allows the code section to be
-    randomly located as well.
-
-    On an Amd64 processor where a library was not compiled with -fPIC, this will cause an error
-    such as: "relocation R_X86_64_32 against `......' can not be used when making a shared object;"
-
-    To build with PIE, use:
-    make -f makefile.unix ... -e PIE=1
-
-    To test that you have built PIE executable, install scanelf, part of paxutils, and use:
-    scanelf -e ./RNRC
-
-    The output should contain:
-     TYPE
-    ET_DYN
-
-* Non-executable Stack
-    If the stack is executable then trivial stack based buffer overflow exploits are possible if
-    vulnerable buffers are found. By default, RNRC should be built with a non-executable stack
-    but if one of the libraries it uses asks for an executable stack or someone makes a mistake
-    and uses a compiler extension which requires an executable stack, it will silently build an
-    executable without the non-executable stack protection.
-
-    To verify that the stack is non-executable after compiling use:
-    scanelf -e ./RNRC
-
-    the output should contain:
-    STK/REL/PTL
-    RW- R-- RW-
-
-    The STK RW- means that the stack is readable and writeable but not executable.
+ * doc/readme-qt.rst        — GUI options (UPNP, DBUS, QRCODE)
+ * doc/build-windows.txt    — Cross-compile Windows CLI/GUI from Ubuntu 22.04
+ * ./compile-windows.sh     — Automated Windows cross-build script

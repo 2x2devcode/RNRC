@@ -1,0 +1,146 @@
+WINDOWS CROSS-COMPILE NOTES (from Ubuntu 22.04)
+===============================================
+
+Build Windows CLI (`RNRCd.exe`) and GUI (`RNRC-qt.exe`) wallets by
+cross-compiling with mingw-w64 on Ubuntu 22.04.
+
+Recommended: use the automated script from the repository root:
+
+    ./compile-windows.sh
+
+The script checks the host OS, installs missing packages, downloads and
+builds OpenSSL / Berkeley DB / Boost / zlib / miniupnpc / (optional) Qt,
+verifies library and header paths, then compiles both executables into:
+
+    release/windows/
+
+
+Manual step-by-step (equivalent to the script)
+----------------------------------------------
+
+0) Host
+
+    Use Ubuntu 22.04 (Jammy). Other releases may work, but paths and
+    package names below are validated for 22.04.
+
+1) Host packages
+
+    sudo apt-get update
+    sudo apt-get install -y \
+        build-essential curl wget git autoconf automake libtool pkg-config \
+        cmake unzip zip gperf bison flex python3 \
+        mingw-w64 g++-mingw-w64-x86-64 gcc-mingw-w64-x86-64 \
+        g++-mingw-w64-i686 gcc-mingw-w64-i686 \
+        libz-mingw-w64-dev
+
+    # Prefer POSIX threading model for the mingw toolchain:
+    sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+    sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+
+2) Dependency prefix
+
+    export TARGET=x86_64-w64-mingw32
+    export DEPS=$PWD/depends/$TARGET
+    mkdir -p "$DEPS"/{include,lib,src}
+    export PATH="/usr/bin:$PATH"
+
+3) OpenSSL 3.x (static)
+
+    cd "$DEPS/src"
+    curl -LO https://www.openssl.org/source/openssl-3.0.13.tar.gz
+    tar xzf openssl-3.0.13.tar.gz && cd openssl-3.0.13
+    ./Configure mingw64 no-shared no-tests --cross-compile-prefix=${TARGET}- \
+        --prefix="$DEPS" --openssldir="$DEPS/ssl"
+    make -j$(nproc) && make install_sw
+
+4) Berkeley DB 4.8.30.NC (wallet format)
+
+    cd "$DEPS/src"
+    # Official Oracle tarball or a known mirror of db-4.8.30.NC.tar.gz
+    tar xzf db-4.8.30.NC.tar.gz && cd db-4.8.30.NC/build_unix
+    ../dist/configure --enable-mingw --enable-cxx --disable-shared --enable-static \
+        --host=$TARGET --prefix="$DEPS" \
+        CC=${TARGET}-gcc CXX=${TARGET}-g++ RANLIB=${TARGET}-ranlib
+    make -j$(nproc) && make install
+
+5) Boost (static, win32 threads)
+
+    cd "$DEPS/src"
+    curl -LO https://archives.boost.io/release/1.82.0/source/boost_1_82_0.tar.bz2
+    tar xjf boost_1_82_0.tar.bz2 && cd boost_1_82_0
+    echo "using gcc : : ${TARGET}-g++ ;" > user-config.jam
+    ./bootstrap.sh
+    ./b2 --user-config=user-config.jam toolset=gcc target-os=windows \
+        threadapi=win32 threading=multi variant=release link=static \
+        runtime-link=static address-model=64 --layout=tagged \
+        --prefix="$DEPS" --with-system --with-filesystem \
+        --with-program_options --with-thread --with-chrono \
+        -j$(nproc) install
+
+6) miniupnpc (optional UPnP)
+
+    cd "$DEPS/src"
+    curl -LO https://miniupnp.tuxfamily.org/files/miniupnpc-2.2.6.tar.gz
+    tar xzf miniupnpc-2.2.6.tar.gz && cd miniupnpc-2.2.6
+    make -f Makefile.mingw CC=${TARGET}-gcc LIB=${TARGET}-ar
+    mkdir -p "$DEPS/include/miniupnpc"
+    cp *.h "$DEPS/include/miniupnpc/" 2>/dev/null || true
+    cp -a include/miniupnpc/*.h "$DEPS/include/miniupnpc/" 2>/dev/null || true
+    cp libminiupnpc.a "$DEPS/lib/"
+
+7) Build Windows CLI
+
+    cd <repo>/src
+    make -f makefile.linux-mingw clean
+    make -f makefile.linux-mingw -j$(nproc) \
+        TARGET_PLATFORM=x86_64 \
+        DEPSDIR="$DEPS" \
+        USE_UPNP=0
+    # Output: src/RNRCd.exe
+
+8) Build Windows GUI (Qt 5)
+
+    Install a mingw Qt 5.15 toolchain (MXE, or a prebuilt Qt for
+    x86_64-w64-mingw32) and ensure `qmake` from that toolchain is first
+    in PATH. Then from the repository root:
+
+    qmake -spec win32-g++ \
+        "USE_UPNP=-" "USE_QRCODE=0" "RELEASE=1" \
+        "BOOST_LIB_SUFFIX=-mt-x64" \
+        "BOOST_INCLUDE_PATH=$DEPS/include" \
+        "BOOST_LIB_PATH=$DEPS/lib" \
+        "BDB_INCLUDE_PATH=$DEPS/include" \
+        "BDB_LIB_PATH=$DEPS/lib" \
+        "OPENSSL_INCLUDE_PATH=$DEPS/include" \
+        "OPENSSL_LIB_PATH=$DEPS/lib" \
+        "QMAKE_CC=${TARGET}-gcc" \
+        "QMAKE_CXX=${TARGET}-g++" \
+        "QMAKE_LINK=${TARGET}-g++" \
+        "QMAKE_LIB=${TARGET}-ar" \
+        "QMAKE_RANLIB=${TARGET}-ranlib" \
+        RNRC-qt.pro
+    make -j$(nproc)
+    # Output: release/RNRC-qt.exe (or ./RNRC-qt.exe depending on qmake)
+
+Verification checklist
+----------------------
+
+ Before compiling, confirm:
+
+  * ${TARGET}-g++ --version
+  * test -f "$DEPS/include/openssl/ssl.h"
+  * test -f "$DEPS/lib/libssl.a" && test -f "$DEPS/lib/libcrypto.a"
+  * test -f "$DEPS/include/db_cxx.h"
+  * test -f "$DEPS/lib/libdb_cxx.a"
+  * ls "$DEPS/lib"/libboost_system*.a
+  * ls "$DEPS/lib"/libboost_thread*.a
+
+ file src/RNRCd.exe should report PE32+ executable (x86-64) for Windows.
+
+32-bit (i686) builds
+--------------------
+
+ Set TARGET=i686-w64-mingw32, address-model=32, OpenSSL Configure mingw
+ (not mingw64), and TARGET_PLATFORM=i686 / BOOST_LIB_SUFFIX=-mt-x32.
+
+See also: ./compile-windows.sh and doc/build-unix.txt

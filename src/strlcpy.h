@@ -20,6 +20,15 @@
 #include <string.h>
 
 /*
+ * glibc 2.38+ (Ubuntu 24.04+) and BSD/macOS already provide strlcpy/strlcat.
+ * Only ship local copies when the C library does not.
+ */
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || \
+    (defined(__GLIBC__) && ((__GLIBC__ > 2) || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 38)))
+/* use system strlcpy / strlcat */
+#else
+
+/*
  * Copy src to string dst of size siz.  At most siz-1 characters
  * will be copied.  Always NUL terminates (unless siz == 0).
  * Returns strlen(src); if retval >= siz, truncation occurred.
@@ -87,4 +96,7 @@ inline size_t strlcat(char *dst, const char *src, size_t siz)
 
     return(dlen + (s - src)); /* count does not include NUL */
 }
+
+#endif /* system strlcpy unavailable */
+
 #endif
