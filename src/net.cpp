@@ -1232,18 +1232,21 @@ void MapPort()
 // Each pair gives a source name and a seed name.
 // The first name is used as information source for addrman.
 // The second name should resolve to a list of seed addresses.
+// DNS / fixed peer seeds (IPs or hostnames). Used to bootstrap addr.dat.
+// Explorer node: http://149.102.139.53:30301/  (P2P default port 18355)
 static const char *strDNSSeed[][2] = {
-    {"185.249.199.205", "185.249.199.205"},
-    {"121.142.85.242", "121.142.85.242"},
-    {"124.80.22.122", "124.80.22.122"},
-    {"59.151.213.58", "59.151.213.58"},
-    {"116.39.234.10", "116.39.234.10"},
-    {"59.187.208.96", "59.187.208.96"},
-    {"82.37.112.143", "82.37.112.143"},
-    {"175.198.107.166", "175.198.107.166"},
-    {"96.42.3.145", "96.42.3.145"},
-    {"SUB02.freeddns.org", "SUB02.freeddns.org"},
-    {"SUB03.freeddns.org", "SUB03.freeddns.org"},
+    {"explorer", "149.102.139.53"},
+    {"seed1", "185.249.199.205"},
+    {"seed2", "121.142.85.242"},
+    {"seed3", "124.80.22.122"},
+    {"seed4", "59.151.213.58"},
+    {"seed5", "116.39.234.10"},
+    {"seed6", "59.187.208.96"},
+    {"seed7", "82.37.112.143"},
+    {"seed8", "175.198.107.166"},
+    {"seed9", "96.42.3.145"},
+    {"seed10", "SUB02.freeddns.org"},
+    {"seed11", "SUB03.freeddns.org"},
 };
 
 void ThreadDNSAddressSeed(void* parg)
@@ -1312,8 +1315,14 @@ void ThreadDNSAddressSeed2(void* parg)
 
 
 
+// Hardcoded seed nodes as little-endian IPv4 (a.b.c.d → bytes in memory order).
+// Used when addrman is empty after ~60s. Default P2P port: 18355.
 unsigned int pnSeed[] =
 {
+    0x358b6695, // 149.102.139.53  (explorer / primary)
+    0xcdc7f9b9, // 185.249.199.205
+    0xf2558e79, // 121.142.85.242
+    0x8f702552, // 82.37.112.143
 };
 
 void DumpAddresses()
