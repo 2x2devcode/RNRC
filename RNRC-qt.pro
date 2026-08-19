@@ -10,7 +10,7 @@ QMAKE_CXXFLAGS += -std=c++17 -Wno-deprecated-declarations -Wno-deprecated-copy
 QMAKE_CFLAGS += -Wno-deprecated-declarations
 
 greaterThan(QT_MAJOR_VERSION, 4) {
-    QT += widgets
+    QT += widgets network
     DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0
 }
 
@@ -236,6 +236,8 @@ HEADERS += src/qt/bitcoingui.h \
     src/allocators.h \
     src/ui_interface.h \
     src/qt/rpcconsole.h \
+    src/qt/networkpage.h \
+    src/qt/peertablemodel.h \
     src/version.h \
     src/netbase.h \
     src/clientversion.h \
@@ -302,6 +304,8 @@ SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/notificator.cpp \
     src/qt/qtipcserver.cpp \
     src/qt/rpcconsole.cpp \
+    src/qt/networkpage.cpp \
+    src/qt/peertablemodel.cpp \
     src/noui.cpp \
     src/kernel.cpp \
     src/scrypt-arm.S \
