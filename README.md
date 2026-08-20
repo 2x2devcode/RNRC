@@ -250,48 +250,76 @@ manual cross-compile walkthrough.
 ### macOS
 
 Tested on macOS 10.15 (Catalina) and later with Homebrew.
+Build **on a Mac** (Xcode CLT + Homebrew). Cross-compile from Ubuntu is not supported.
 
-#### 1 — Install dependencies via Homebrew
+#### Automatic build (recommended)
+
+```bash
+git clone https://github.com/2x2devcode/RNRC.git
+cd RNRC
+./compile-macos.sh
+```
+
+Outputs:
+
+- `release/macos/RNRCd` — CLI daemon
+- `release/macos/RNRC-Qt.app` — Qt GUI wallet (frameworks bundled via `macdeployqt`)
+
+Useful options:
+
+```bash
+BUILD_CLI=0 ./compile-macos.sh          # GUI only
+USE_UPNP=1 ./compile-macos.sh           # enable miniupnpc
+MACOSX_DEPLOYMENT_TARGET=11.0 ./compile-macos.sh
+```
+
+No Apple Developer account is required to build or run locally. Notarized
+public distribution needs the Apple Developer Program. See `doc/build-macos.txt`.
+
+#### Manual build (Homebrew)
 
 ```bash
 brew install boost openssl@3 berkeley-db@4 miniupnpc qt@5 pkg-config
 ```
 
-#### 2 — Build the CLI daemon
+CLI:
 
 ```bash
-git clone https://github.com/2x2devcode/RNRC.git
-cd RNRC/src
-CXXFLAGS="-std=c++17 -I$(brew --prefix openssl@3)/include \
-          -I$(brew --prefix berkeley-db@4)/include \
-          -I$(brew --prefix boost)/include" \
-LDFLAGS="-L$(brew --prefix openssl@3)/lib \
-         -L$(brew --prefix berkeley-db@4)/lib \
-         -L$(brew --prefix boost)/lib" \
-make -f makefile.unix -j$(sysctl -n hw.logicalcpu)
+cd src
+make -f makefile.osx -j$(sysctl -n hw.logicalcpu) RELEASE=1 USE_UPNP=- \
+  OPENSSL_INCLUDE_PATH=$(brew --prefix openssl@3)/include \
+  OPENSSL_LIB_PATH=$(brew --prefix openssl@3)/lib \
+  BOOST_INCLUDE_PATH=$(brew --prefix boost)/include \
+  BOOST_LIB_PATH=$(brew --prefix boost)/lib \
+  BOOST_LIB_SUFFIX= \
+  BDB_INCLUDE_PATH=$(brew --prefix berkeley-db@4)/include \
+  BDB_LIB_PATH=$(brew --prefix berkeley-db@4)/lib \
+  BDB_LIB_SUFFIX=-4.8
 ```
 
-#### 3 — Build the Qt GUI wallet
+GUI:
 
 ```bash
 cd ..   # repository root
 export PATH="$(brew --prefix qt@5)/bin:$PATH"
-qmake \
+qmake RELEASE=1 USE_UPNP=- \
   BOOST_INCLUDE_PATH=$(brew --prefix boost)/include \
   BOOST_LIB_PATH=$(brew --prefix boost)/lib \
+  BOOST_LIB_SUFFIX= \
   BDB_INCLUDE_PATH=$(brew --prefix berkeley-db@4)/include \
   BDB_LIB_PATH=$(brew --prefix berkeley-db@4)/lib \
+  BDB_LIB_SUFFIX=-4.8 \
   OPENSSL_INCLUDE_PATH=$(brew --prefix openssl@3)/include \
   OPENSSL_LIB_PATH=$(brew --prefix openssl@3)/lib \
   RNRC-qt.pro
 make -j$(sysctl -n hw.logicalcpu)
-# Output: RNRC-qt.app
+# Output: RNRC-Qt.app
 ```
 
 #### Notes
 
-- On Apple Silicon (M-series) you may need to set `arch -x86_64` prefixes
-  or build a universal binary depending on your Homebrew installation.
+- On Apple Silicon, Homebrew under `/opt/homebrew` is used automatically.
+- `compile-macos.sh` detects Boost/BDB library name suffixes for your brew install.
 - If Berkeley DB 4.8 is not available in Homebrew, install from source with
   `--enable-cxx`.
 

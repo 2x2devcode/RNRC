@@ -1,0 +1,66 @@
+macOS build notes (RNRC)
+========================
+
+Build on a Mac with Xcode Command Line Tools and Homebrew.
+Cross-compiling the Qt GUI from Linux/Ubuntu is not supported.
+
+Quick start
+-----------
+
+    ./compile-macos.sh
+
+Artifacts:
+
+    release/macos/RNRCd
+    release/macos/RNRC-Qt.app
+    release/macos/logs/
+
+Options
+-------
+
+    BUILD_GUI=1|0              # default 1
+    BUILD_CLI=1|0              # default 1
+    USE_UPNP=-|1               # default - (disabled)
+    USE_QRCODE=0|1             # default 0
+    DEPLOY_APP=1|0             # run macdeployqt (default 1)
+    MACOSX_DEPLOYMENT_TARGET=10.15
+    JOBS=$(sysctl -n hw.logicalcpu)
+
+Examples:
+
+    BUILD_CLI=0 ./compile-macos.sh
+    USE_UPNP=1 ./compile-macos.sh
+
+Homebrew packages
+-----------------
+
+Installed automatically by the script if missing:
+
+    boost openssl@3 berkeley-db@4 qt@5 pkg-config
+    miniupnpc   # only when USE_UPNP is not "-"
+    qrencode    # only when USE_QRCODE=1
+
+Apple Developer account
+-----------------------
+
+- Not required to compile or run locally.
+- First launch may need: right-click RNRC-Qt.app → Open (Gatekeeper).
+- Apple Developer Program (~US$99/year) is only needed to sign and
+  notarize builds for smooth public distribution.
+
+Manual GUI build (equivalent)
+-----------------------------
+
+    brew install boost openssl@3 berkeley-db@4 qt@5 pkg-config
+    export PATH="$(brew --prefix qt@5)/bin:$PATH"
+    mkdir -p build-macos-qt && cd build-macos-qt
+    qmake RELEASE=1 USE_UPNP=- \
+      BOOST_INCLUDE_PATH=$(brew --prefix boost)/include \
+      BOOST_LIB_PATH=$(brew --prefix boost)/lib \
+      BDB_INCLUDE_PATH=$(brew --prefix berkeley-db@4)/include \
+      BDB_LIB_PATH=$(brew --prefix berkeley-db@4)/lib \
+      OPENSSL_INCLUDE_PATH=$(brew --prefix openssl@3)/include \
+      OPENSSL_LIB_PATH=$(brew --prefix openssl@3)/lib \
+      ../RNRC-qt.pro
+    make -j$(sysctl -n hw.logicalcpu)
+    macdeployqt RNRC-Qt.app -always-overwrite
