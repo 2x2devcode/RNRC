@@ -102,7 +102,13 @@ Manual step-by-step (equivalent to the script)
         cmake unzip zip gperf bison flex python3 \
         mingw-w64 g++-mingw-w64-x86-64 gcc-mingw-w64-x86-64 \
         g++-mingw-w64-i686 gcc-mingw-w64-i686 \
-        libz-mingw-w64-dev
+        libz-mingw-w64-dev \
+        qttools5-dev-tools
+
+    # Host lrelease (from qttools5-dev-tools) is required for GUI translations.
+    # MXE's win32 qmake would otherwise invoke "...\\lrelease.exe", which GNU
+    # make collapses to "binlrelease.exe" (Error 127). compile-windows.sh
+    # always passes QMAKE_LRELEASE=<host lrelease>.
 
     # Prefer POSIX threading model for the mingw toolchain:
     sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
