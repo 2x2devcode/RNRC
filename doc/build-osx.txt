@@ -11,6 +11,14 @@ Mac OS X RNRCd build instructions
 Laszlo Hanyecz <solar@heliacal.net>
 Douglas Huff <dhuff@jrbobdobbs.org>
 
+Preferred modern path (Homebrew, CLI + GUI):
+
+    ./compile-macos.sh
+
+See also doc/build-macos.txt and the macOS section in README.md.
+
+The steps below are the historical MacPorts / makefile.osx flow.
+
 
 See readme-qt.rst for instructions on building RNRC QT, the
 graphical user interface.
