@@ -353,9 +353,16 @@ CODECFORTR = UTF-8
 # also add new translations to src/qt/bitcoin.qrc under translations/
 TRANSLATIONS = $$files(src/qt/locale/bitcoin_*.ts)
 
+# Translations are compiled on the *host* (lrelease), never with the target
+# toolchain. MXE/win32 qmake sets QT_INSTALL_BINS to a Windows path and the
+# default "$$[QT_INSTALL_BINS]\\lrelease.exe" becomes ".../binlrelease.exe"
+# under GNU make on Linux (Error 127). Only use .exe when the host is Windows.
 isEmpty(QMAKE_LRELEASE) {
-    win32:QMAKE_LRELEASE = $$[QT_INSTALL_BINS]\\lrelease.exe
-    else:QMAKE_LRELEASE = $$[QT_INSTALL_BINS]/lrelease
+    equals(QMAKE_HOST.os, Windows) {
+        QMAKE_LRELEASE = $$[QT_INSTALL_BINS]\\lrelease.exe
+    } else {
+        QMAKE_LRELEASE = lrelease
+    }
 }
 isEmpty(QM_DIR):QM_DIR = $$PWD/src/qt/locale
 # automatically build translations, so they can be included in resource file

@@ -216,7 +216,9 @@ install_host_packages() {
         "g++-mingw-w64-${mingw_pkg_arch}"
         "gcc-mingw-w64-${mingw_pkg_arch}"
         # GUI / Qt cross-build host tools
+        # qttools5-dev-tools provides host lrelease (needed for .ts -> .qm under MXE)
         gperf bison flex
+        qttools5-dev-tools
         libgl1-mesa-dev libglu1-mesa-dev
         libfontconfig1-dev libfreetype6-dev
         libx11-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev
@@ -782,6 +784,18 @@ build_gui() {
     rm -f "$ROOT/src/leveldb/libleveldb.a" "$ROOT/src/leveldb/libmemenv.a"
     make -C "$ROOT/src/leveldb" clean >/dev/null 2>&1 || true
 
+    # Host lrelease for .ts -> .qm. MXE's win32 qmake would otherwise pick
+    # "...\\lrelease.exe", which GNU make collapses to "binlrelease.exe".
+    local host_lrelease
+    host_lrelease="$(command -v lrelease-qt5 || command -v lrelease || true)"
+    if [[ -z "$host_lrelease" ]]; then
+        warn "Host lrelease not found; installing qttools5-dev-tools"
+        apt_install qttools5-dev-tools
+        host_lrelease="$(command -v lrelease-qt5 || command -v lrelease || true)"
+    fi
+    [[ -n "$host_lrelease" ]] || die "Host lrelease missing (install qttools5-dev-tools)"
+    log "Using host lrelease: $host_lrelease"
+
     local qmake_args=(
         "USE_UPNP=-"
         "USE_QRCODE=0"
@@ -799,6 +813,7 @@ build_gui() {
         # Force fully static MinGW runtime (no libstdc++-6.dll / libwinpthread-1.dll)
         "QMAKE_LFLAGS+=-static -static-libgcc -static-libstdc++"
         "LIBS+=-Wl,-Bstatic -lstdc++ -lwinpthread -lpthread -lgcc_eh -lgcc"
+        "QMAKE_LRELEASE=${host_lrelease}"
     )
 
     # When using our own Qt (not MXE wrappers), force mingw compilers
@@ -810,7 +825,6 @@ build_gui() {
             "QMAKE_LINK=${TARGET}-g++"
             "QMAKE_LIB=${TARGET}-ar"
             "QMAKE_RANLIB=${TARGET}-ranlib"
-            "QMAKE_LRELEASE=$(command -v lrelease-qt5 || command -v lrelease || echo lrelease)"
         )
     fi
 
