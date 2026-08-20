@@ -491,6 +491,10 @@ install_mxe_qt() {
         return 1
     fi
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$tools_pkg" 2>/dev/null || true
+    # MXE Qt Network is typically openssl-linked (OpenSSL 1.1). The wallet's
+    # depends/ OpenSSL 3 must NOT win the -lssl search path for GUI links.
+    local ssl_pkg="mxe-${MXE_APT_ARCH}-w64-mingw32.static-openssl"
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$ssl_pkg" 2>/dev/null || true
 
     # Sanity-check qmake wrapper
     if [[ -x "${MXE_PREFIX}/usr/bin/${MXE_TARGET}-qmake-qt5" ]]; then
@@ -690,10 +694,12 @@ find_mingw_qmake() {
         return 0
     fi
     local c
+    # Prefer our Schannel-built Qt (no OpenSSL inside QtNetwork) over MXE's
+    # openssl-linked Qt, which conflicts with depends/ OpenSSL 3 at link time.
     for c in \
+        "$DEPS/qt/bin/qmake" \
         "${MXE_PREFIX}/usr/bin/${MXE_TARGET}-qmake-qt5" \
         "${MXE_PREFIX}/usr/${MXE_TARGET}/qt5/bin/qmake" \
-        "$DEPS/qt/bin/qmake" \
         "$HOME/mxe/usr/bin/${MXE_TARGET}-qmake-qt5" \
         "$HOME/mxe/usr/${MXE_TARGET}/qt5/bin/qmake"
     do
@@ -796,6 +802,31 @@ build_gui() {
     [[ -n "$host_lrelease" ]] || die "Host lrelease missing (install qttools5-dev-tools)"
     log "Using host lrelease: $host_lrelease"
 
+    # OpenSSL for the GUI:
+    # - Schannel Qt (DEPS): wallet crypto uses depends/ OpenSSL 3
+    # - MXE Qt: QtNetwork was built against MXE OpenSSL 1.1; linking depends/
+    #   OpenSSL 3 yields undefined refs (SSL_get_peer_certificate, EVP_PKEY_base_id).
+    #   Use MXE OpenSSL for headers+libs and put its -L ahead of depends/.
+    local openssl_inc="$DEPS/include"
+    local openssl_lib="$DEPS/lib"
+    local qmake_lflags=(-static -static-libgcc -static-libstdc++)
+    if [[ "$qmake_bin" == *"/mxe/"* ]]; then
+        local mxe_root="${MXE_PREFIX}/usr/${MXE_TARGET}"
+        if [[ ! -f "$mxe_root/lib/libssl.a" || ! -f "$mxe_root/lib/libcrypto.a" ]]; then
+            warn "MXE OpenSSL missing; installing mxe-${MXE_APT_ARCH}-w64-mingw32.static-openssl"
+            setup_mxe_apt || true
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                "mxe-${MXE_APT_ARCH}-w64-mingw32.static-openssl" || true
+        fi
+        [[ -f "$mxe_root/lib/libssl.a" ]] || die "MXE libssl.a missing under $mxe_root/lib (needed for MXE Qt Network)"
+        [[ -f "$mxe_root/include/openssl/ssl.h" ]] || die "MXE OpenSSL headers missing under $mxe_root/include"
+        openssl_inc="$mxe_root/include"
+        openssl_lib="$mxe_root/lib"
+        # Prepend MXE -L so -lssl/-lcrypto resolve to 1.1 before depends/ OpenSSL 3
+        qmake_lflags=("-L${mxe_root}/lib" "${qmake_lflags[@]}")
+        log "MXE Qt detected: using MXE OpenSSL at $mxe_root (not depends/ OpenSSL 3)"
+    fi
+
     local qmake_args=(
         "USE_UPNP=-"
         "USE_QRCODE=0"
@@ -808,11 +839,11 @@ build_gui() {
         "BOOST_LIB_PATH=${DEPS}/lib"
         "BDB_INCLUDE_PATH=${DEPS}/include"
         "BDB_LIB_PATH=${DEPS}/lib"
-        "OPENSSL_INCLUDE_PATH=${DEPS}/include"
-        "OPENSSL_LIB_PATH=${DEPS}/lib"
+        "OPENSSL_INCLUDE_PATH=${openssl_inc}"
+        "OPENSSL_LIB_PATH=${openssl_lib}"
         # Force fully static MinGW runtime (no libstdc++-6.dll / libwinpthread-1.dll).
         # Omit -lgcc_eh: MXE GCC 5.5 has no libgcc_eh.a (-static-libgcc is enough).
-        "QMAKE_LFLAGS+=-static -static-libgcc -static-libstdc++"
+        "QMAKE_LFLAGS+=${qmake_lflags[*]}"
         "LIBS+=-Wl,-Bstatic -lstdc++ -lwinpthread -lpthread"
         "QMAKE_LRELEASE=${host_lrelease}"
     )
