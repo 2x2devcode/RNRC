@@ -457,6 +457,8 @@ contains(RELEASE, 1) {
 
 # MUST be last on the link line. An earlier -Wl,-Bdynamic (or the g++ driver
 # default) would pull shared libstdc++-6.dll / libwinpthread-1.dll.
-win32:LIBS += -Wl,-Bstatic -lstdc++ -lwinpthread -lpthread -lgcc_eh -lgcc
+# Do not add -lgcc_eh: MXE's GCC 5.5 static toolchain has no libgcc_eh.a
+# (exception unwind lives in libgcc; -static-libgcc already pulls it in).
+win32:LIBS += -Wl,-Bstatic -lstdc++ -lwinpthread -lpthread
 
 system($$QMAKE_LRELEASE -silent $$_PRO_FILE_)

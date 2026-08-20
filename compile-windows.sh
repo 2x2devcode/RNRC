@@ -66,7 +66,7 @@ write_error_extract() {
         echo
         echo "--- matching lines (error / undefined reference / make fail) ---"
         grep -nE \
-            'error:|undefined reference|collect2:|fatal error:|^\[.*\] ERROR:|gmake: \*\*\*|make(\[[0-9]+\])?: \*\*\*|ERROR: Feature' \
+            'error:|undefined reference|collect2:|fatal error:|cannot find -l|^\[.*\] ERROR:|gmake: \*\*\*|make(\[[0-9]+\])?: \*\*\*|ERROR: Feature' \
             "$src" 2>/dev/null | tail -n 200 || echo "(no matching error lines found)"
         echo
         echo "--- last 80 lines of full log ---"
@@ -810,9 +810,10 @@ build_gui() {
         "BDB_LIB_PATH=${DEPS}/lib"
         "OPENSSL_INCLUDE_PATH=${DEPS}/include"
         "OPENSSL_LIB_PATH=${DEPS}/lib"
-        # Force fully static MinGW runtime (no libstdc++-6.dll / libwinpthread-1.dll)
+        # Force fully static MinGW runtime (no libstdc++-6.dll / libwinpthread-1.dll).
+        # Omit -lgcc_eh: MXE GCC 5.5 has no libgcc_eh.a (-static-libgcc is enough).
         "QMAKE_LFLAGS+=-static -static-libgcc -static-libstdc++"
-        "LIBS+=-Wl,-Bstatic -lstdc++ -lwinpthread -lpthread -lgcc_eh -lgcc"
+        "LIBS+=-Wl,-Bstatic -lstdc++ -lwinpthread -lpthread"
         "QMAKE_LRELEASE=${host_lrelease}"
     )
 
