@@ -126,16 +126,16 @@ void RandAddSeedPerfmon()
 
 #ifdef WIN32
     // Don't need this on Linux, OpenSSL automatically uses /dev/urandom
-    // Seed with the entire set of perfmon data
-    unsigned char pdata[250000];
-    memset(pdata, 0, sizeof(pdata));
-    unsigned long nSize = sizeof(pdata);
-    long ret = RegQueryValueExA(HKEY_PERFORMANCE_DATA, "Global", NULL, NULL, pdata, &nSize);
+    // Seed with the entire set of perfmon data. Heap-allocate: 250KB on the
+    // stack of ProcessMessage's thread races with scrypt's former stack pad.
+    std::vector<unsigned char> pdata(250000, 0);
+    unsigned long nSize = pdata.size();
+    long ret = RegQueryValueExA(HKEY_PERFORMANCE_DATA, "Global", NULL, NULL, &pdata[0], &nSize);
     RegCloseKey(HKEY_PERFORMANCE_DATA);
     if (ret == ERROR_SUCCESS)
     {
-        RAND_add(pdata, nSize, nSize/100.0);
-        memset(pdata, 0, nSize);
+        RAND_add(&pdata[0], nSize, nSize/100.0);
+        memset(&pdata[0], 0, nSize);
         printf("RandAddSeed() %lu bytes\n", nSize);
     }
 #endif

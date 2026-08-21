@@ -230,9 +230,12 @@ namespace Checkpoints
         int nHeight = pindexPrev->nHeight + 1;
 
         LOCK(cs_hashSyncCheckpoint);
-        // sync-checkpoint should always be accepted block
-        assert(mapBlockIndex.count(hashSyncCheckpoint));
-        const CBlockIndex* pindexSync = mapBlockIndex[hashSyncCheckpoint];
+        // Do not use mapBlockIndex[] — a missing hash would insert a NULL
+        // CBlockIndex* and the next ->nHeight would ACCESS_VIOLATION (NDEBUG).
+        std::map<uint256, CBlockIndex*>::iterator miSync = mapBlockIndex.find(hashSyncCheckpoint);
+        if (miSync == mapBlockIndex.end() || miSync->second == NULL)
+            return error("CheckSync: block index missing for current sync-checkpoint %s", hashSyncCheckpoint.ToString().c_str());
+        const CBlockIndex* pindexSync = miSync->second;
 
         if (nHeight > pindexSync->nHeight)
         {
@@ -367,9 +370,10 @@ namespace Checkpoints
     bool IsMatureSyncCheckpoint()
     {
         LOCK(cs_hashSyncCheckpoint);
-        // sync-checkpoint should always be accepted block
-        assert(mapBlockIndex.count(hashSyncCheckpoint));
-        const CBlockIndex* pindexSync = mapBlockIndex[hashSyncCheckpoint];
+        std::map<uint256, CBlockIndex*>::iterator miSync = mapBlockIndex.find(hashSyncCheckpoint);
+        if (miSync == mapBlockIndex.end() || miSync->second == NULL)
+            return false;
+        const CBlockIndex* pindexSync = miSync->second;
         return (nBestHeight >= pindexSync->nHeight + nCoinbaseMaturity ||
                 pindexSync->GetBlockTime() + nStakeMinAge < GetAdjustedTime());
     }
