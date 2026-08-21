@@ -2451,9 +2451,24 @@ FILE* OpenBlockFile(unsigned int nFile, unsigned int nBlockPos, const char* pszM
 
 static unsigned int nCurrentBlockFile = 1;
 
+// Soft target for blkNNNN.dat rotation. Hard ceiling stays near 2 GiB (ftell/FAT limits).
+static unsigned int GetMaxBlockFileSize()
+{
+    static const int64 nHardCap = (int64)0x7F000000 - MAX_SIZE;
+    static const int64 nDefault = 200LL * 1024 * 1024; // 200 MiB
+    static const int64 nMinimum = 16LL * 1024 * 1024;  // 16 MiB
+    int64 nMax = GetArg("-maxblkfilesize", nDefault);
+    if (nMax < nMinimum)
+        nMax = nMinimum;
+    if (nMax > nHardCap)
+        nMax = nHardCap;
+    return (unsigned int)nMax;
+}
+
 FILE* AppendBlockFile(unsigned int& nFileRet)
 {
     nFileRet = 0;
+    const unsigned int nMaxFileSize = GetMaxBlockFileSize();
     while (true)
     {
         FILE* file = OpenBlockFile(nCurrentBlockFile, 0, "ab");
@@ -2461,8 +2476,8 @@ FILE* AppendBlockFile(unsigned int& nFileRet)
             return NULL;
         if (fseek(file, 0, SEEK_END) != 0)
             return NULL;
-        // FAT32 file size max 4GB, fseek and ftell max 2GB, so we must stay under 2GB
-        if (ftell(file) < (long)(0x7F000000 - MAX_SIZE))
+        // Rotate before exceeding -maxblkfilesize (default 200 MiB). Hard cap ~2 GiB.
+        if (ftell(file) < (long)nMaxFileSize)
         {
             nFileRet = nCurrentBlockFile;
             return file;
