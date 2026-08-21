@@ -126,6 +126,7 @@ genbuild.target = $$OUT_PWD/build/build.h
 PRE_TARGETDEPS += $$OUT_PWD/build/build.h
 QMAKE_EXTRA_TARGETS += genbuild
 DEFINES += HAVE_BUILD_INFO
+INCLUDEPATH += $$OUT_PWD/build
 
 contains(USE_O3, 1) {
     message(Building O3 optimization flag)
