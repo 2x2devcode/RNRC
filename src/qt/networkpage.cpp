@@ -184,8 +184,9 @@ void NetworkPage::setClientModel(ClientModel *model)
     peerModel->startAutoRefresh();
     seedCheckTimer->start();
     refresh();
-    // One deferred seed probe after startup; do not block setClientModel.
-    QTimer::singleShot(0, this, SLOT(checkSeedConnectivity()));
+    // Defer first seed probe until after the UI is up and IBD has a chance to
+    // settle. waitForConnected can still spin nested Qt events on Windows.
+    QTimer::singleShot(60 * 1000, this, SLOT(checkSeedConnectivity()));
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +260,12 @@ void NetworkPage::refresh()
 {
     if (fRefreshing)
         return;
+    // Avoid peer-model resets while seed TCP waits nest Qt events.
+    if (fCheckingSeeds)
+    {
+        updateSummary();
+        return;
+    }
     fRefreshing = true;
 
     if (peerModel)
@@ -272,7 +279,8 @@ void NetworkPage::refresh()
 void NetworkPage::refreshAll()
 {
     refresh();
-    checkSeedConnectivity();
+    // Manual button: allow seed probes even during IBD.
+    runSeedProbes();
 }
 
 void NetworkPage::updateStats(int numConnections, int numBlocks)
@@ -282,13 +290,23 @@ void NetworkPage::updateStats(int numConnections, int numBlocks)
 }
 
 // ---------------------------------------------------------------------------
-// TCP seed connectivity check (blocking). Never call from numBlocksChanged.
+// TCP seed connectivity check. Automatic path skips IBD; Refresh button forces.
 // ---------------------------------------------------------------------------
 void NetworkPage::checkSeedConnectivity()
 {
+    if (clientModel && clientModel->inInitialBlockDownload())
+        return;
+    runSeedProbes();
+}
+
+void NetworkPage::runSeedProbes()
+{
     if (fCheckingSeeds)
         return;
+
     fCheckingSeeds = true;
+    if (peerModel)
+        peerModel->stopAutoRefresh();
 
     for (int i = 0; i < seedAddresses.size(); ++i)
     {
@@ -304,11 +322,14 @@ void NetworkPage::checkSeedConnectivity()
         probe.connectToHost(host, port);
         bool ok = probe.waitForConnected(SEED_TCP_TIMEOUT_MS);
         if (ok) probe.disconnectFromHost();
+        else probe.abort();
 
         seedStatusLabels[i]->setText(statusDot(ok ? 1 : 2));
         // Do NOT call QApplication::processEvents here: nested timer/model
         // resets during IBD caused ACCESS_VIOLATION (c0000005) on Windows.
     }
 
+    if (peerModel)
+        peerModel->startAutoRefresh();
     fCheckingSeeds = false;
 }

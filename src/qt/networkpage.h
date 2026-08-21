@@ -39,7 +39,7 @@ public:
     void setClientModel(ClientModel *model);
 
 public slots:
-    /** Update peers table + summary (safe for frequent block/connection signals). */
+    /** Update peers table + summary (safe for connection-change signals). */
     void refresh();
 
     /** Full refresh including blocking seed TCP probes (button / infrequent timer). */
@@ -48,14 +48,19 @@ public slots:
     /** Update the summary counters (connections / blocks). */
     void updateStats(int numConnections, int numBlocks);
 
+    /** Summary labels only — must be a slot for numBlocksChanged during IBD. */
+    void updateSummary();
+
 private slots:
+    /** Timer / deferred entry: skipped while in initial block download. */
     void checkSeedConnectivity();
 
 private:
     void buildSeedSection();
     void buildPeerSection();
     void buildSummarySection();
-    void updateSummary();
+    /** Blocking per-seed TCP probes (GUI thread). Caller must not nest via processEvents. */
+    void runSeedProbes();
     /** Return coloured HTML "●" indicator: green=ok, red=fail, grey=unknown. */
     static QString statusDot(int state); // 0=unknown, 1=ok, 2=fail
 
