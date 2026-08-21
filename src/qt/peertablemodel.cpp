@@ -25,7 +25,8 @@ static void CopyPeerStats(std::vector<CNodeStats> &out)
 PeerTableModel::PeerTableModel(ClientModel *parent)
     : QAbstractTableModel(parent),
       clientModel(parent),
-      timer(0)
+      timer(0),
+      fRefreshing(false)
 {
     columns << tr("Address")
             << tr("User Agent")
@@ -58,12 +59,20 @@ void PeerTableModel::stopAutoRefresh()
 
 void PeerTableModel::refresh()
 {
+    // Nested refresh (e.g. timer during a blocking GUI path) must not
+    // re-enter beginResetModel — that crashes Qt views on Windows.
+    if (fRefreshing)
+        return;
+    fRefreshing = true;
+
     std::vector<CNodeStats> fresh;
     CopyPeerStats(fresh);
 
     beginResetModel();
     peers = fresh;
     endResetModel();
+
+    fRefreshing = false;
 }
 
 int PeerTableModel::rowCount(const QModelIndex &) const

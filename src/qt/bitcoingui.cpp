@@ -968,8 +968,13 @@ void BitcoinGUI::updateStakingIcon()
 
     if (nLastCoinStakeSearchInterval && nWeight)
     {
-        uint64_t nNetworkWeight = GetPoSKernelPS();
-        unsigned nEstimateTime = nTargetSpacing * nNetworkWeight / nWeight;
+        uint64_t nNetworkWeight = 0;
+        {
+            TRY_LOCK(cs_main, lockMain);
+            if (lockMain)
+                nNetworkWeight = GetPoSKernelPS();
+        }
+        unsigned nEstimateTime = nNetworkWeight ? nTargetSpacing * nNetworkWeight / nWeight : 0;
 
         QString text;
         if (nEstimateTime < 60)
@@ -997,7 +1002,7 @@ void BitcoinGUI::updateStakingIcon()
         labelStakingIcon->setPixmap(QIcon(":/icons/staking_off").pixmap(STATUSBAR_ICONSIZE,STATUSBAR_ICONSIZE));
         if (pwalletMain && pwalletMain->IsLocked())
             labelStakingIcon->setToolTip(tr("Not staking because wallet is locked"));
-        else if (vNodes.empty())
+        else if (clientModel && clientModel->getNumConnections() == 0)
             labelStakingIcon->setToolTip(tr("Not staking because wallet is offline"));
         else if (IsInitialBlockDownload())
             labelStakingIcon->setToolTip(tr("Not staking because wallet is syncing"));

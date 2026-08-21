@@ -41,7 +41,8 @@ ClientModel::~ClientModel()
 
 int ClientModel::getNumConnections() const
 {
-    return vNodes.size();
+    LOCK(cs_vNodes);
+    return (int)vNodes.size();
 }
 
 int ClientModel::getNumBlocks() const
@@ -67,16 +68,18 @@ QDateTime ClientModel::getLastBlockDate() const
 
 void ClientModel::updateTimer()
 {
-    // Get required lock upfront. This avoids the GUI from getting stuck on
-    // periodical polls if the core is holding the locks for a longer time -
-    // for example, during a wallet rescan.
-    TRY_LOCK(cs_main, lockMain);
-    if(!lockMain)
-        return;
-    // Some quantities (such as number of blocks) change so fast that we don't want to be notified for each change.
-    // Periodically check and update with a timer.
-    int newNumBlocks = getNumBlocks();
-    int newNumBlocksOfPeers = getNumBlocksOfPeers();
+    // Snapshot under cs_main, then release before emitting. Slots (e.g.
+    // NetworkPage::refresh) must not run while the GUI thread holds cs_main —
+    // nested processEvents / peer-model resets under that lock crash on Windows.
+    int newNumBlocks = 0;
+    int newNumBlocksOfPeers = 0;
+    {
+        TRY_LOCK(cs_main, lockMain);
+        if(!lockMain)
+            return;
+        newNumBlocks = nBestHeight;
+        newNumBlocksOfPeers = getNumBlocksOfPeers();
+    }
 
     if(cachedNumBlocks != newNumBlocks || cachedNumBlocksOfPeers != newNumBlocksOfPeers)
     {
