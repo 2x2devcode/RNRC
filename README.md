@@ -362,7 +362,16 @@ rpcallowip=127.0.0.1
 # Staking
 staking=1
 # reservebalance=1000   # keep 1000 RNRC out of staking pool
+
+# Resource / disk (optional)
+# maxblkfilesize=209715200   # rotate blkNNNN.dat at ~200 MiB (default)
+# maxconnections=40          # peer limit (default 40)
+# minersleep=2000            # ms between stake attempts (default 2000; higher = less CPU)
+# dbcache=16                 # LevelDB cache MiB (default 25; only a small part of RAM use)
+# staking=0                  # lowest CPU if you are not staking
 ```
+
+Most RAM use (~hundreds of MB to ~1 GB on a long chain) comes from the in-memory block index and wallet, not from `dbcache`. An existing huge `blk0001.dat` is not rewritten; after upgrading, new blocks are written to smaller `blk0002.dat`, `blk0003.dat`, … files.
 
 ---
 
