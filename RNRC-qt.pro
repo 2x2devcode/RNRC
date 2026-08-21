@@ -119,15 +119,14 @@ QMAKE_EXTRA_TARGETS += genleveldb
 # Gross ugly hack that depends on qmake internals, unfortunately there is no other way to do it.
 QMAKE_CLEAN += $$PWD/src/leveldb/libleveldb.a; cd $$PWD/src/leveldb ; $(MAKE) clean
 
-# regenerate src/build.h
-!windows|contains(USE_BUILD_INFO, 1) {
-    genbuild.depends = FORCE
-    genbuild.commands = cd $$PWD; /bin/sh share/genbuild.sh $$OUT_PWD/build/build.h
-    genbuild.target = $$OUT_PWD/build/build.h
-    PRE_TARGETDEPS += $$OUT_PWD/build/build.h
-    QMAKE_EXTRA_TARGETS += genbuild
-    DEFINES += HAVE_BUILD_INFO
-}
+# regenerate src/build.h (always — including Windows cross builds)
+genbuild.depends = FORCE
+genbuild.commands = mkdir -p $$OUT_PWD/build && cd $$PWD && /bin/sh share/genbuild.sh $$OUT_PWD/build/build.h
+genbuild.target = $$OUT_PWD/build/build.h
+PRE_TARGETDEPS += $$OUT_PWD/build/build.h
+QMAKE_EXTRA_TARGETS += genbuild
+DEFINES += HAVE_BUILD_INFO
+INCLUDEPATH += $$OUT_PWD/build
 
 contains(USE_O3, 1) {
     message(Building O3 optimization flag)

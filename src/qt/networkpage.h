@@ -22,8 +22,10 @@ QT_END_NAMESPACE
  *
  * Displays:
  *   • Summary statistics (connections, block height, last block time)
- *   • Hardcoded seed nodes with live TCP connectivity status
- *   • Table of currently connected peers (auto-refreshed)
+ *   • Hardcoded seed nodes with status derived from live peer connections
+ *     (no blocking TCP probes on the GUI thread — those caused Windows
+ *     ACCESS_VIOLATION / c0000005 during IBD)
+ *   • Table of currently connected peers (auto-refreshed when not in IBD)
  *
  * Call setClientModel() once a ClientModel is available.
  */
@@ -42,33 +44,28 @@ public slots:
     /** Update peers table + summary (safe for connection-change signals). */
     void refresh();
 
-    /** Full refresh including blocking seed TCP probes (button / infrequent timer). */
+    /** Same as refresh (kept for the Refresh button). */
     void refreshAll();
 
     /** Update the summary counters (connections / blocks). */
     void updateStats(int numConnections, int numBlocks);
 
-    /** Summary labels only — must be a slot for numBlocksChanged during IBD. */
+    /** Summary + seed dots only — safe for high-frequency numBlocksChanged. */
     void updateSummary();
-
-private slots:
-    /** Timer / deferred entry: skipped while in initial block download. */
-    void checkSeedConnectivity();
 
 private:
     void buildSeedSection();
     void buildPeerSection();
     void buildSummarySection();
-    /** Blocking per-seed TCP probes (GUI thread). Caller must not nest via processEvents. */
-    void runSeedProbes();
+    /** Colour seed dots from currently connected peers (no network I/O). */
+    void updateSeedStatusFromPeers();
     /** Return coloured HTML "●" indicator: green=ok, red=fail, grey=unknown. */
-    static QString statusDot(int state); // 0=unknown, 1=ok, 2=fail
+    static QString statusDot(int state); // 0=unknown, 1=connected, 2=not connected
 
     ClientModel    *clientModel;
     PeerTableModel *peerModel;
     QSortFilterProxyModel *proxyModel;
     bool            fRefreshing;
-    bool            fCheckingSeeds;
 
     // Summary labels
     QLabel *lblConnections;
@@ -84,8 +81,6 @@ private:
 
     // Refresh button
     QPushButton    *refreshButton;
-
-    QTimer         *seedCheckTimer;
 };
 
 #endif // NETWORKPAGE_H
