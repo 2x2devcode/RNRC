@@ -2454,10 +2454,10 @@ static unsigned int nCurrentBlockFile = 1;
 // Soft target for blkNNNN.dat rotation. Hard ceiling stays near 2 GiB (ftell/FAT limits).
 static unsigned int GetMaxBlockFileSize()
 {
-    static const int64 nHardCap = (int64)0x7F000000 - MAX_SIZE;
-    static const int64 nDefault = 200LL * 1024 * 1024; // 200 MiB
-    static const int64 nMinimum = 16LL * 1024 * 1024;  // 16 MiB
-    int64 nMax = GetArg("-maxblkfilesize", nDefault);
+    static const int64_t nHardCap = (int64_t)0x7F000000 - MAX_SIZE;
+    static const int64_t nDefault = 200LL * 1024 * 1024; // 200 MiB
+    static const int64_t nMinimum = 16LL * 1024 * 1024;  // 16 MiB
+    int64_t nMax = GetArg("-maxblkfilesize", nDefault);
     if (nMax < nMinimum)
         nMax = nMinimum;
     if (nMax > nHardCap)
