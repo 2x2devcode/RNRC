@@ -63,6 +63,9 @@ void PeerTableModel::refresh()
     // re-enter beginResetModel — that crashes Qt views on Windows.
     if (fRefreshing)
         return;
+    // Skip model resets while catching up; NetworkPage still updates labels.
+    if (clientModel && clientModel->inInitialBlockDownload())
+        return;
     fRefreshing = true;
 
     std::vector<CNodeStats> fresh;
