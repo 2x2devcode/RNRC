@@ -10,7 +10,6 @@
 #include "net.h"
 #include "main.h"
 
-#include <QApplication>
 #include <QDateTime>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -54,6 +53,8 @@ NetworkPage::NetworkPage(QWidget *parent)
       clientModel(0),
       peerModel(0),
       proxyModel(0),
+      fRefreshing(false),
+      fCheckingSeeds(false),
       lblConnections(0),
       lblBlocks(0),
       lblLastBlock(0),
@@ -76,7 +77,8 @@ NetworkPage::NetworkPage(QWidget *parent)
     // ---- refresh button ---------------------------------------------------
     refreshButton = new QPushButton(tr("Refresh"), this);
     refreshButton->setMaximumWidth(120);
-    connect(refreshButton, SIGNAL(clicked()), this, SLOT(refresh()));
+    // Manual refresh may run seed TCP probes; block/connection signals must not.
+    connect(refreshButton, SIGNAL(clicked()), this, SLOT(refreshAll()));
 
     // ---- horizontal splitter: left=seeds, right=peers --------------------
     QSplitter *splitter = new QSplitter(Qt::Horizontal, this);
@@ -140,7 +142,8 @@ NetworkPage::NetworkPage(QWidget *parent)
     bottomBar->addWidget(refreshButton);
     mainLayout->addLayout(bottomBar);
 
-    // ---- seed connectivity check timer (every 60 s while page is visible)
+    // Seed TCP probes are slow/blocking — keep them on a slow timer only,
+    // never on every numBlocksChanged during IBD.
     seedCheckTimer = new QTimer(this);
     seedCheckTimer->setInterval(60 * 1000);
     connect(seedCheckTimer, SIGNAL(timeout()), this, SLOT(checkSeedConnectivity()));
@@ -174,12 +177,15 @@ void NetworkPage::setClientModel(ClientModel *model)
     peersTable->horizontalHeader()->setResizeMode(PeerTableModel::StartHeight,QHeaderView::ResizeToContents);
     peersTable->horizontalHeader()->setResizeMode(PeerTableModel::BanScore,   QHeaderView::ResizeToContents);
 
+    // Connections: refresh peer rows. Blocks: summary labels only (no model reset).
     connect(model, SIGNAL(numConnectionsChanged(int)), this, SLOT(refresh()));
-    connect(model, SIGNAL(numBlocksChanged(int,int)), this, SLOT(refresh()));
+    connect(model, SIGNAL(numBlocksChanged(int,int)), this, SLOT(updateSummary()));
 
     peerModel->startAutoRefresh();
     seedCheckTimer->start();
     refresh();
+    // One deferred seed probe after startup; do not block setClientModel.
+    QTimer::singleShot(0, this, SLOT(checkSeedConnectivity()));
 }
 
 // ---------------------------------------------------------------------------
@@ -230,24 +236,42 @@ QString NetworkPage::statusDot(int state)
 }
 
 // ---------------------------------------------------------------------------
-// Public slot: refresh everything
+// Summary labels only
+// ---------------------------------------------------------------------------
+void NetworkPage::updateSummary()
+{
+    if (!clientModel)
+        return;
+
+    int conn    = clientModel->getNumConnections();
+    int blocks  = clientModel->getNumBlocks();
+    QDateTime dt = clientModel->getLastBlockDate();
+
+    lblConnections->setText(QString::number(conn));
+    lblBlocks->setText(QString::number(blocks));
+    lblLastBlock->setText(GUIUtil::dateTimeStr(dt));
+}
+
+// ---------------------------------------------------------------------------
+// Public slot: lightweight refresh (peers + summary). Safe during IBD.
 // ---------------------------------------------------------------------------
 void NetworkPage::refresh()
 {
+    if (fRefreshing)
+        return;
+    fRefreshing = true;
+
     if (peerModel)
         peerModel->refresh();
 
-    if (clientModel)
-    {
-        int conn    = clientModel->getNumConnections();
-        int blocks  = clientModel->getNumBlocks();
-        QDateTime dt = clientModel->getLastBlockDate();
+    updateSummary();
 
-        lblConnections->setText(QString::number(conn));
-        lblBlocks->setText(QString::number(blocks));
-        lblLastBlock->setText(GUIUtil::dateTimeStr(dt));
-    }
+    fRefreshing = false;
+}
 
+void NetworkPage::refreshAll()
+{
+    refresh();
     checkSeedConnectivity();
 }
 
@@ -258,10 +282,14 @@ void NetworkPage::updateStats(int numConnections, int numBlocks)
 }
 
 // ---------------------------------------------------------------------------
-// TCP seed connectivity check (blocking per-seed, runs only on explicit refresh)
+// TCP seed connectivity check (blocking). Never call from numBlocksChanged.
 // ---------------------------------------------------------------------------
 void NetworkPage::checkSeedConnectivity()
 {
+    if (fCheckingSeeds)
+        return;
+    fCheckingSeeds = true;
+
     for (int i = 0; i < seedAddresses.size(); ++i)
     {
         QString addr = seedAddresses[i];
@@ -270,7 +298,6 @@ void NetworkPage::checkSeedConnectivity()
         QString host = addr.left(colon);
         quint16 port = addr.mid(colon + 1).toUShort();
 
-        // Set to "unknown" while checking
         seedStatusLabels[i]->setText(statusDot(0));
 
         QTcpSocket probe;
@@ -279,7 +306,9 @@ void NetworkPage::checkSeedConnectivity()
         if (ok) probe.disconnectFromHost();
 
         seedStatusLabels[i]->setText(statusDot(ok ? 1 : 2));
-        // Allow the GUI to repaint between each probe
-        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+        // Do NOT call QApplication::processEvents here: nested timer/model
+        // resets during IBD caused ACCESS_VIOLATION (c0000005) on Windows.
     }
+
+    fCheckingSeeds = false;
 }

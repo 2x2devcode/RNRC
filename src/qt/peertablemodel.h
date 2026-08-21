@@ -64,6 +64,7 @@ private:
     std::vector<CNodeStats>  peers;
     QTimer                  *timer;
     QStringList              columns;
+    bool                     fRefreshing;
 };
 
 #endif // PEERTABLEMODEL_H

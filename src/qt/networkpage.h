@@ -39,8 +39,11 @@ public:
     void setClientModel(ClientModel *model);
 
 public slots:
-    /** Manually refresh peers table and seed statuses. */
+    /** Update peers table + summary (safe for frequent block/connection signals). */
     void refresh();
+
+    /** Full refresh including blocking seed TCP probes (button / infrequent timer). */
+    void refreshAll();
 
     /** Update the summary counters (connections / blocks). */
     void updateStats(int numConnections, int numBlocks);
@@ -52,12 +55,15 @@ private:
     void buildSeedSection();
     void buildPeerSection();
     void buildSummarySection();
+    void updateSummary();
     /** Return coloured HTML "●" indicator: green=ok, red=fail, grey=unknown. */
     static QString statusDot(int state); // 0=unknown, 1=ok, 2=fail
 
     ClientModel    *clientModel;
     PeerTableModel *peerModel;
     QSortFilterProxyModel *proxyModel;
+    bool            fRefreshing;
+    bool            fCheckingSeeds;
 
     // Summary labels
     QLabel *lblConnections;
