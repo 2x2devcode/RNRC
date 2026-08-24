@@ -36,6 +36,8 @@
 #include "util.h"
 #include "net.h"
 
+#include <vector>
+
 #define SCRYPT_BUFFER_SIZE (131072 + 63)
 
 #if defined (OPTIMIZED_SALSA) && ( defined (__x86_64__) || defined (__i386__) || defined(__arm__) )
@@ -166,14 +168,16 @@ uint256 scrypt(const void* data, size_t datalen, const void* salt, size_t saltle
 
 uint256 scrypt_hash(const void* input, size_t inputlen)
 {
-    unsigned char scratchpad[SCRYPT_BUFFER_SIZE];
-    return scrypt_nosalt(input, inputlen, scratchpad);
+    // Heap scratchpad: 128KiB on the stack blows MinGW/boost worker threads
+    // (and musl) during GetPoWHash in ProcessBlock/AcceptBlock.
+    std::vector<unsigned char> scratchpad(SCRYPT_BUFFER_SIZE);
+    return scrypt_nosalt(input, inputlen, &scratchpad[0]);
 }
 
 uint256 scrypt_salted_hash(const void* input, size_t inputlen, const void* salt, size_t saltlen)
 {
-    unsigned char scratchpad[SCRYPT_BUFFER_SIZE];
-    return scrypt(input, inputlen, salt, saltlen, scratchpad);
+    std::vector<unsigned char> scratchpad(SCRYPT_BUFFER_SIZE);
+    return scrypt(input, inputlen, salt, saltlen, &scratchpad[0]);
 }
 
 uint256 scrypt_salted_multiround_hash(const void* input, size_t inputlen, const void* salt, size_t saltlen, const unsigned int nRounds)
@@ -192,7 +196,7 @@ uint256 scrypt_salted_multiround_hash(const void* input, size_t inputlen, const 
 
 uint256 scrypt_blockhash(const void* input)
 {
-    unsigned char scratchpad[SCRYPT_BUFFER_SIZE];
-    return scrypt_nosalt(input, 80, scratchpad);
+    std::vector<unsigned char> scratchpad(SCRYPT_BUFFER_SIZE);
+    return scrypt_nosalt(input, 80, &scratchpad[0]);
 }
 

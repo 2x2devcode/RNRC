@@ -543,8 +543,20 @@ void StakeMiner(CWallet *pwallet)
                 return;
         }
 
-        while (vNodes.empty() || IsInitialBlockDownload())
+        // Never touch vNodes without cs_vNodes. During IBD the message thread
+        // holds cs_main in ProcessBlock while the socket/open-conn threads
+        // mutate vNodes; an unlocked empty()/size() here is a consistent
+        // Windows ACCESS_VIOLATION (c0000005) race — debug.log stops mid-block
+        // with no ProcessBlock: ACCEPTED while GetMyExternalIP/addr keep logging.
+        while (true)
         {
+            bool fNoPeers;
+            {
+                LOCK(cs_vNodes);
+                fNoPeers = vNodes.empty();
+            }
+            if (!fNoPeers && !IsInitialBlockDownload())
+                break;
             nLastCoinStakeSearchInterval = 0;
             fTryToSync = true;
             MilliSleep(1000);
@@ -555,7 +567,12 @@ void StakeMiner(CWallet *pwallet)
         if (fTryToSync)
         {
             fTryToSync = false;
-            if (vNodes.size() < 3 || nBestHeight < GetNumBlocksOfPeers())
+            int nNodes;
+            {
+                LOCK(cs_vNodes);
+                nNodes = (int)vNodes.size();
+            }
+            if (nNodes < 3 || nBestHeight < GetNumBlocksOfPeers())
             {
                 MilliSleep(60000);
                 continue;
