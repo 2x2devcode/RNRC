@@ -309,6 +309,8 @@ CPrivKey CKey::GetPrivKey() const
 
 bool CKey::SetPubKey(const CPubKey& vchPubKey)
 {
+    if (vchPubKey.vchPubKey.empty())
+        return false;
     const unsigned char* pbegin = &vchPubKey.vchPubKey[0];
     if (o2i_ECPublicKey(&pkey, &pbegin, vchPubKey.vchPubKey.size()))
     {
@@ -317,6 +319,8 @@ bool CKey::SetPubKey(const CPubKey& vchPubKey)
             SetCompressedPubKey();
         return true;
     }
+    // If vchPubKey data is bad o2i_ECPublicKey() can leave pkey in a state
+    // where EC_KEY_free() crashes. Leak and recreate (same as SetPrivKey).
     pkey = NULL;
     Reset();
     return false;
@@ -459,6 +463,8 @@ bool CKey::SetCompactSignature(uint256 hash, const std::vector<unsigned char>& v
 
 bool CKey::Verify(uint256 hash, const std::vector<unsigned char>& vchSig)
 {
+    if (!pkey || vchSig.empty())
+        return false;
     // -1 = error, 0 = bad sig, 1 = good
     if (ECDSA_verify(0, (unsigned char*)&hash, sizeof(hash), &vchSig[0], vchSig.size(), pkey) != 1)
         return false;

@@ -403,7 +403,9 @@ void BitcoinGUI::setClientModel(ClientModel *clientModel)
         rpcConsole->setClientModel(clientModel);
         addressBookPage->setOptionsModel(clientModel->getOptionsModel());
         receiveCoinsPage->setOptionsModel(clientModel->getOptionsModel());
-        networkPage->setClientModel(clientModel);
+        // Defer Network tab wiring until after IBD — peer-model / seed status
+        // updates during the first PoS blocks coincided with Windows AVs.
+        QTimer::singleShot(0, this, SLOT(tryAttachNetworkPage()));
     }
 }
 
@@ -769,6 +771,19 @@ void BitcoinGUI::gotoNetworkPage()
 
     exportAction->setEnabled(false);
     disconnect(exportAction, SIGNAL(triggered()), 0, 0);
+}
+
+void BitcoinGUI::tryAttachNetworkPage()
+{
+    if (!clientModel || !networkPage)
+        return;
+    // Keep the Network tab inert while catching up past the first PoS blocks.
+    if (clientModel->inInitialBlockDownload())
+    {
+        QTimer::singleShot(5000, this, SLOT(tryAttachNetworkPage()));
+        return;
+    }
+    networkPage->setClientModel(clientModel);
 }
 
 void BitcoinGUI::gotoSignMessageTab(QString addr)

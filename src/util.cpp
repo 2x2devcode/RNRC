@@ -1368,7 +1368,11 @@ bool NewThread(void(*pfn)(void*), void* parg)
     start->parg = parg;
 
     const unsigned nStackBytes = 16u * 1024u * 1024u;
-    uintptr_t h = _beginthreadex(NULL, nStackBytes, BitcoinThreadTrampoline, start, 0, NULL);
+    // STACK_SIZE_PARAM_IS_A_RESERVATION (0x10000): treat nStackBytes as reserve
+    // size so Windows actually gives the worker 16 MiB (otherwise large values
+    // may be ignored / only commit the default ~1 MiB).
+    uintptr_t h = _beginthreadex(NULL, nStackBytes, BitcoinThreadTrampoline, start,
+                                 0x10000 /* STACK_SIZE_PARAM_IS_A_RESERVATION */, NULL);
     if (!h)
     {
         delete start;
