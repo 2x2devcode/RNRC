@@ -51,6 +51,7 @@ namespace boost {
 #endif
 #include <io.h> /* for _commit */
 #include "shlobj.h"
+#include <process.h> /* _beginthreadex — CRT-initialized threads */
 #elif defined(__linux__)
 # include <sys/prctl.h>
 #endif
@@ -1333,8 +1334,50 @@ void RenameThread(const char* name)
 #endif
 }
 
+#ifdef WIN32
+namespace {
+struct ThreadStart {
+    void (*pfn)(void*);
+    void* parg;
+};
+
+// CRT thread entry: initializes per-thread CRT state (unlike CreateThread).
+static unsigned __stdcall BitcoinThreadTrampoline(void* p)
+{
+    ThreadStart* s = static_cast<ThreadStart*>(p);
+    void (*fn)(void*) = s->pfn;
+    void* arg = s->parg;
+    delete s;
+    fn(arg);
+    _endthreadex(0);
+    return 0;
+}
+} // namespace
+#endif
+
 bool NewThread(void(*pfn)(void*), void* parg)
 {
+#ifdef WIN32
+    // MinGW/boost historically used CreateThread without CRT TLS init and with
+    // a small default stack. Validating the first proof-of-stake coinstake
+    // (block ~30: multi-input CheckTransaction/serialization) then AVs with
+    // c0000005 on the message-handler worker. Use CRT _beginthreadex and a
+    // 16 MiB stack so IBD can pass the PoW→PoS transition on Windows GUI.
+    ThreadStart* start = new ThreadStart;
+    start->pfn = pfn;
+    start->parg = parg;
+
+    const unsigned nStackBytes = 16u * 1024u * 1024u;
+    uintptr_t h = _beginthreadex(NULL, nStackBytes, BitcoinThreadTrampoline, start, 0, NULL);
+    if (!h)
+    {
+        delete start;
+        printf("Error creating thread: _beginthreadex failed (err=%lu)\n", GetLastError());
+        return false;
+    }
+    CloseHandle(reinterpret_cast<HANDLE>(h)); // detach
+    return true;
+#else
     try
     {
         boost::thread(pfn, parg); // thread detaches when out of scope
@@ -1343,4 +1386,5 @@ bool NewThread(void(*pfn)(void*), void* parg)
         return false;
     }
     return true;
+#endif
 }

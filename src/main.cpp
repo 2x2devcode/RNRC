@@ -1063,11 +1063,15 @@ unsigned int ComputeMinStake(unsigned int nBase, int64_t nTime, unsigned int nBl
 }
 
 
-// ppcoin: find last block index up to pindex
+// ppcoin: find last block index up to pindex of the requested proof type.
+// On the first PoW→PoS transition there is no prior PoS block — return NULL
+// instead of genesis (PoW), so callers use the stake target limit.
 const CBlockIndex* GetLastBlockIndex(const CBlockIndex* pindex, bool fProofOfStake)
 {
     while (pindex && pindex->pprev && (pindex->IsProofOfStake() != fProofOfStake))
         pindex = pindex->pprev;
+    if (pindex && pindex->IsProofOfStake() != fProofOfStake)
+        return NULL;
     return pindex;
 }
 
@@ -2149,6 +2153,11 @@ bool CBlock::AcceptBlock()
     // Verify hash target and signature of coinstake tx
     if (IsProofOfStake())
     {
+        // Log the chain's first PoS block (height ~30 on mainnet) once.
+        if (GetLastBlockIndex(pindexPrev, true) == NULL)
+            printf("AcceptBlock: first proof-of-stake block height=%d hash=%s\n",
+                   nHeight, hash.ToString().c_str());
+
         uint256 targetProofOfStake;
         if (!CheckProofOfStake(vtx[1], nBits, hashProof, targetProofOfStake))
         {
