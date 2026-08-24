@@ -154,6 +154,8 @@ private slots:
     void gotoSendCoinsPage();
     /** Switch to network (peers) page */
     void gotoNetworkPage();
+    /** Attach Network tab model after IBD settles (avoids Windows AV during first PoS). */
+    void tryAttachNetworkPage();
 
     /** Show Sign/Verify Message dialog and switch to sign message tab */
     void gotoSignMessageTab(QString addr = "");
