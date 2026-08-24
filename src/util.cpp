@@ -1363,9 +1363,7 @@ bool NewThread(void(*pfn)(void*), void* parg)
     // (block ~30: multi-input CheckTransaction/serialization) then AVs with
     // c0000005 on the message-handler worker. Use CRT _beginthreadex and a
     // 16 MiB stack so IBD can pass the PoW→PoS transition on Windows GUI.
-    ThreadStart* start = new (std::nothrow) ThreadStart;
-    if (!start)
-        return false;
+    ThreadStart* start = new ThreadStart;
     start->pfn = pfn;
     start->parg = parg;
 
