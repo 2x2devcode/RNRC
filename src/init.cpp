@@ -17,6 +17,7 @@
 #include <boost/interprocess/sync/file_lock.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <openssl/crypto.h>
+#include <openssl/opensslv.h>
 
 #ifndef WIN32
 #include <signal.h>
@@ -542,7 +543,13 @@ bool AppInit2()
         ShrinkDebugFile();
     printf("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
     printf("RNRC version %s (%s)\n", FormatFullVersion().c_str(), CLIENT_DATE.c_str());
+#if defined(OPENSSL_VERSION_STR)
+    printf("Using OpenSSL version %s\n", OpenSSL_version(OPENSSL_VERSION));
+#elif defined(OPENSSL_VERSION_TEXT)
+    printf("Using OpenSSL version %s\n", OPENSSL_VERSION_TEXT);
+#else
     printf("Using OpenSSL version %s\n", SSLeay_version(SSLEAY_VERSION));
+#endif
     if (!fLogTimestamps)
         printf("Startup time: %s\n", DateTimeStrFormat("%x %H:%M:%S", GetTime()).c_str());
     printf("Default data directory %s\n", GetDefaultDataDir().string().c_str());
