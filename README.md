@@ -156,7 +156,7 @@ Tested on Ubuntu 22.04, 24.04 and 26.04.
 sudo apt update
 sudo apt install -y \
     build-essential libssl-dev libboost-all-dev \
-    libdb++-dev libminiupnpc-dev pkg-config git autoconf
+    libdb++-dev libminiupnpc-dev zlib1g-dev pkg-config git autoconf
 ```
 
 For the Qt GUI wallet also install:
