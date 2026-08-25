@@ -284,17 +284,22 @@ void RPCConsole::setClientModel(ClientModel *model)
         setNumBlocks(model->getNumBlocks(), model->getNumBlocksOfPeers());
 
         // Network tab — connected peers + banned list
+        // Always refresh peers here (including during IBD); getpeerinfo works
+        // while syncing and the Debug tab should match.
         peerModel = new PeerTableModel(model);
+        peerModel->setRefreshDuringIbd(true);
         ui->peerWidget->setModel(peerModel);
         ui->peerWidget->horizontalHeader()->setResizeMode(PeerTableModel::NodeId,     QHeaderView::ResizeToContents);
         ui->peerWidget->horizontalHeader()->setResizeMode(PeerTableModel::Address,   QHeaderView::Stretch);
         ui->peerWidget->horizontalHeader()->setResizeMode(PeerTableModel::UserAgent, QHeaderView::ResizeToContents);
         ui->peerWidget->horizontalHeader()->setResizeMode(PeerTableModel::Ping,      QHeaderView::ResizeToContents);
+        peerModel->refresh();
 
         banModel = new BanTableModel(model);
         ui->banlistWidget->setModel(banModel);
         ui->banlistWidget->horizontalHeader()->setResizeMode(BanTableModel::Address,     QHeaderView::Stretch);
         ui->banlistWidget->horizontalHeader()->setResizeMode(BanTableModel::BannedUntil, QHeaderView::ResizeToContents);
+        banModel->refresh();
     }
 }
 
