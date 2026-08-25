@@ -7,6 +7,7 @@
 #include "optionsmodel.h"
 #include "guiutil.h"
 #include "guiconstants.h"
+#include "intro.h"
 
 #include "init.h"
 #include "ui_interface.h"
@@ -131,22 +132,34 @@ int main(int argc, char *argv[])
     // Command-line options take precedence:
     ParseParameters(argc, argv);
 
-    // ... then bitcoin.conf:
-    if (!boost::filesystem::is_directory(GetDataDir(false)))
-    {
-        // This message can not be translated, as translation is not initialized yet
-        // (which not yet possible because lang=XX can be overridden in bitcoin.conf in the data directory)
-        QMessageBox::critical(0, "RNRC",
-                              QString("Error: Specified data directory \"%1\" does not exist.").arg(QString::fromStdString(mapArgs["-datadir"])));
-        return 1;
-    }
-    ReadConfigFile(mapArgs, mapMultiArgs);
-
-    // Application identification (must be set before OptionsModel is initialized,
-    // as it is used to locate QSettings)
+    // Application identification (must be set before Intro/QSettings and OptionsModel)
     app.setOrganizationName("RNRC");
     //XXX app.setOrganizationDomain("");
-    if(GetBoolArg("-testnet")) // Separate UI settings for testnet
+    // Application name is refined after config (testnet), but QSettings org is enough for Intro.
+    app.setApplicationName(GetBoolArg("-testnet") ? "RNRC-Qt-testnet" : "RNRC-Qt");
+
+    // Choose data directory before any GetDataDir() cache (first run / missing saved path).
+    // Do NOT call GetDataDir() before Intro::pickDataDirectory().
+    if (mapArgs.count("-datadir"))
+    {
+        if (!boost::filesystem::is_directory(mapArgs["-datadir"]))
+        {
+            // Translation may not be ready yet (lang can come from conf in datadir)
+            QMessageBox::critical(0, "RNRC",
+                                  QString("Error: Specified data directory \"%1\" does not exist.").arg(QString::fromStdString(mapArgs["-datadir"])));
+            return 1;
+        }
+    }
+    else if (!Intro::pickDataDirectory())
+    {
+        return 0;
+    }
+
+    // ... then bitcoin.conf (from the selected data directory):
+    ReadConfigFile(mapArgs, mapMultiArgs);
+
+    // Refine application name after config may have set -testnet
+    if(GetBoolArg("-testnet"))
         app.setApplicationName("RNRC-Qt-testnet");
     else
         app.setApplicationName("RNRC-Qt");

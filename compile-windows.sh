@@ -841,6 +841,8 @@ build_gui() {
         "BDB_LIB_PATH=${DEPS}/lib"
         "OPENSSL_INCLUDE_PATH=${openssl_inc}"
         "OPENSSL_LIB_PATH=${openssl_lib}"
+        "ZLIB_INCLUDE_PATH=${DEPS}/include"
+        "ZLIB_LIB_PATH=${DEPS}/lib"
         # Force fully static MinGW runtime (no libstdc++-6.dll / libwinpthread-1.dll).
         # Omit -lgcc_eh: MXE GCC 5.5 has no libgcc_eh.a (-static-libgcc is enough).
         "QMAKE_LFLAGS+=${qmake_lflags[*]}"

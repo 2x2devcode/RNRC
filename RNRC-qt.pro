@@ -243,12 +243,14 @@ HEADERS += src/qt/bitcoingui.h \
     src/qt/rpcconsole.h \
     src/qt/networkpage.h \
     src/qt/peertablemodel.h \
+    src/qt/intro.h \
     src/version.h \
     src/netbase.h \
     src/clientversion.h \
     src/threadsafety.h
 
 SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
+    src/qt/intro.cpp \
     src/qt/transactiontablemodel.cpp \
     src/qt/addresstablemodel.cpp \
     src/qt/optionsdialog.cpp \
@@ -444,6 +446,10 @@ macx:QMAKE_CXXFLAGS_THREAD += -pthread
 INCLUDEPATH += $$OPENSSL_INCLUDE_PATH $$BOOST_INCLUDE_PATH $$BDB_INCLUDE_PATH $$QRENCODE_INCLUDE_PATH
 LIBS += $$join(OPENSSL_LIB_PATH,,-L,) $$join(BOOST_LIB_PATH,,-L,) $$join(BDB_LIB_PATH,,-L,) $$join(QRENCODE_LIB_PATH,,-L,)
 LIBS += -lssl -lcrypto -ldb_cxx$$BDB_LIB_SUFFIX
+# zlib: gzip bootstrap.dat support in Intro dialog
+!isEmpty(ZLIB_INCLUDE_PATH):INCLUDEPATH += $$ZLIB_INCLUDE_PATH
+!isEmpty(ZLIB_LIB_PATH):LIBS += $$join(ZLIB_LIB_PATH,,-L,)
+LIBS += -lz
 # -lgdi32 has to happen after -lcrypto (see  #681)
 windows:LIBS += -lws2_32 -lshlwapi -lmswsock -lole32 -loleaut32 -luuid -lgdi32
 # Static Qt (Schannel / platform plugin) often needs these beyond the defaults

@@ -128,6 +128,8 @@ The data directory is:
 | Windows | `%APPDATA%\RNRC\` |
 | macOS | `~/Library/Application Support/RNRC/` |
 
+On first launch of **RNRC-Qt** (or if the previously saved data folder is missing), a welcome screen lets you choose the data directory. You can also point to a downloaded `bootstrap.dat` (or a folder containing it, or a `.gz` / `.zip`). The wallet copies or decompresses it into the data directory and imports the chain automatically on startup.
+
 ---
 
 ## Building from Source
