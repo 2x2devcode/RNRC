@@ -26,7 +26,8 @@ PeerTableModel::PeerTableModel(ClientModel *parent)
     : QAbstractTableModel(parent),
       clientModel(parent),
       timer(0),
-      fRefreshing(false)
+      fRefreshing(false),
+      fRefreshDuringIbd(false)
 {
     columns << tr("NodeId")
             << tr("Node/Service")
@@ -40,6 +41,11 @@ PeerTableModel::PeerTableModel(ClientModel *parent)
 
 PeerTableModel::~PeerTableModel()
 {
+}
+
+void PeerTableModel::setRefreshDuringIbd(bool enable)
+{
+    fRefreshDuringIbd = enable;
 }
 
 void PeerTableModel::startAutoRefresh()
@@ -57,7 +63,9 @@ void PeerTableModel::refresh()
 {
     if (fRefreshing)
         return;
-    if (clientModel && clientModel->inInitialBlockDownload())
+    // Skip model resets during IBD unless the Debug Network tab opted in —
+    // high-frequency beginResetModel painted poorly on Windows NetworkPage.
+    if (!fRefreshDuringIbd && clientModel && clientModel->inInitialBlockDownload())
         return;
     fRefreshing = true;
 
