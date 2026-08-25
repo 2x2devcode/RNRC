@@ -44,6 +44,12 @@ public:
 
     const CNodeStats *nodeStats(int row) const;
 
+    /**
+     * When true, refresh while IBD is in progress (Debug Network tab).
+     * Default false: NetworkPage skips IBD refreshes to avoid Windows paint churn.
+     */
+    void setRefreshDuringIbd(bool enable);
+
     void startAutoRefresh();
     void stopAutoRefresh();
 
@@ -56,6 +62,7 @@ private:
     QTimer                  *timer;
     QStringList              columns;
     bool                     fRefreshing;
+    bool                     fRefreshDuringIbd;
 };
 
 #endif // PEERTABLEMODEL_H
