@@ -252,8 +252,19 @@ build_zlib() {
 }
 
 build_openssl() {
-    local marker="$DEPS/.openssl.ok"
-    [[ -f "$marker" ]] && { log "OpenSSL already built"; return 0; }
+    local marker="$DEPS/.openssl-${OPENSSL_VER}.ok"
+    # Drop stale markers/libs from older OpenSSL (e.g. 1.1.1i) so we always
+    # end up with OPENSSL_VER (default 3.0.13).
+    if [[ -f "$marker" && -f "$DEPS/lib/libssl.a" && -f "$DEPS/include/openssl/opensslv.h" ]]; then
+        if grep -q "OpenSSL ${OPENSSL_VER}" "$DEPS/include/openssl/opensslv.h" \
+            || grep -qE "OPENSSL_VERSION_TEXT \"OpenSSL ${OPENSSL_VER}" "$DEPS/include/openssl/opensslv.h"; then
+            log "OpenSSL ${OPENSSL_VER} already built"
+            return 0
+        fi
+    fi
+    rm -f "$DEPS"/.openssl.ok "$DEPS"/.openssl-*.ok
+    rm -f "$DEPS/lib/libssl.a" "$DEPS/lib/libcrypto.a" "$DEPS/lib64/libssl.a" "$DEPS/lib64/libcrypto.a"
+
     mkdir -p "$SRC_DEPS"
     cd "$SRC_DEPS"
     download "https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz" "openssl-${OPENSSL_VER}.tar.gz" \
@@ -263,6 +274,7 @@ build_openssl() {
     cd "openssl-${OPENSSL_VER}"
     local conf="mingw64"
     [[ "$TARGET_ARCH" == "i686" ]] && conf="mingw"
+    log "Building OpenSSL ${OPENSSL_VER} (${conf})"
     ./Configure "$conf" no-shared no-tests no-module \
         --cross-compile-prefix="${TARGET}-" \
         --prefix="$DEPS" --libdir=lib --openssldir="$DEPS/ssl"
@@ -273,8 +285,24 @@ build_openssl() {
         cp -a "$DEPS/lib64/"*.a "$DEPS/lib/" 2>/dev/null || true
     fi
     verify_file "$DEPS/lib/libssl.a" "OpenSSL install did not produce libssl.a"
+    verify_file "$DEPS/include/openssl/opensslv.h" "OpenSSL headers missing opensslv.h"
+    if ! grep -qE "OpenSSL ${OPENSSL_VER}" "$DEPS/include/openssl/opensslv.h"; then
+        warn "opensslv.h does not mention OpenSSL ${OPENSSL_VER}; dumping version macros:"
+        grep -E 'OPENSSL_VERSION|SHLIB_VERSION' "$DEPS/include/openssl/opensslv.h" | head -20 || true
+        die "OpenSSL build does not look like ${OPENSSL_VER}"
+    fi
     touch "$marker"
 }
+
+verify_openssl_deps() {
+    verify_file "$DEPS/include/openssl/ssl.h" "OpenSSL headers"
+    verify_file "$DEPS/lib/libssl.a" "OpenSSL libssl"
+    verify_file "$DEPS/lib/libcrypto.a" "OpenSSL libcrypto"
+    grep -qE "OpenSSL ${OPENSSL_VER}" "$DEPS/include/openssl/opensslv.h" \
+        || die "depends/ OpenSSL is not ${OPENSSL_VER} — remove $DEPS/.openssl*.ok and rebuild"
+    log "Using depends/ OpenSSL ${OPENSSL_VER}"
+}
+
 
 build_bdb() {
     local marker="$DEPS/.bdb.ok"
@@ -389,9 +417,7 @@ check_deps_links() {
         mkdir -p "$DEPS/lib"
         cp -a "$DEPS/lib64/"*.a "$DEPS/lib/" 2>/dev/null || true
     fi
-    verify_file "$DEPS/include/openssl/ssl.h" "OpenSSL headers"
-    verify_file "$DEPS/lib/libssl.a" "OpenSSL libssl"
-    verify_file "$DEPS/lib/libcrypto.a" "OpenSSL libcrypto"
+    verify_openssl_deps
     verify_file "$DEPS/include/db_cxx.h" "Berkeley DB C++ header"
     if [[ ! -f "$DEPS/lib/libdb_cxx.a" ]]; then
         local f
@@ -491,10 +517,10 @@ install_mxe_qt() {
         return 1
     fi
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$tools_pkg" 2>/dev/null || true
-    # MXE Qt Network is typically openssl-linked (OpenSSL 1.1). The wallet's
-    # depends/ OpenSSL 3 must NOT win the -lssl search path for GUI links.
-    local ssl_pkg="mxe-${MXE_APT_ARCH}-w64-mingw32.static-openssl"
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$ssl_pkg" 2>/dev/null || true
+    # Prefer Schannel Qt + depends/ OpenSSL 3.0.13 for the wallet. MXE Qt is
+    # typically openssl-linked against OpenSSL 1.1 and must not be used for
+    # RNRC-qt if we want "Using OpenSSL version OpenSSL 3.0.13" in debug.log.
+    # Do not install MXE openssl as the wallet crypto backend.
 
     # Sanity-check qmake wrapper
     if [[ -x "${MXE_PREFIX}/usr/bin/${MXE_TARGET}-qmake-qt5" ]]; then
@@ -694,8 +720,8 @@ find_mingw_qmake() {
         return 0
     fi
     local c
-    # Prefer our Schannel-built Qt (no OpenSSL inside QtNetwork) over MXE's
-    # openssl-linked Qt, which conflicts with depends/ OpenSSL 3 at link time.
+    # Prefer our Schannel-built Qt (no OpenSSL inside QtNetwork) so the wallet
+    # can link depends/ OpenSSL 3.0.13. MXE openssl-linked Qt pulls OpenSSL 1.1.
     for c in \
         "$DEPS/qt/bin/qmake" \
         "${MXE_PREFIX}/usr/bin/${MXE_TARGET}-qmake-qt5" \
@@ -711,22 +737,41 @@ find_mingw_qmake() {
     return 1
 }
 
+ensure_schannel_qt() {
+    # Wallet crypto must report OpenSSL OPENSSL_VER. MXE Qt is usually built
+    # against OpenSSL 1.1 and forces that ABI into the link. Prefer/build our
+    # Schannel Qt under DEPS instead.
+    if [[ -x "$DEPS/qt/bin/qmake" ]]; then
+        log "Using Schannel Qt from $DEPS/qt/bin/qmake (OpenSSL ${OPENSSL_VER} for wallet)"
+        return 0
+    fi
+    log "Building Qt from source with Schannel so wallet can use OpenSSL ${OPENSSL_VER}"
+    build_qt_from_source
+    [[ -x "$DEPS/qt/bin/qmake" ]] || die "Schannel Qt qmake missing after build_qt_from_source"
+}
+
 ensure_qt() {
     if [[ "$BUILD_GUI" != "1" ]]; then
         return 0
     fi
-    if find_mingw_qmake >/dev/null; then
-        log "Found mingw Qt qmake: $(find_mingw_qmake)"
+    # Always provision Schannel Qt for OpenSSL 3.0.13 wallet crypto.
+    # ALLOW_MXE_QT=1 keeps the old MXE fallback (results in OpenSSL 1.1.1i).
+    if [[ "${ALLOW_MXE_QT:-0}" == "1" ]]; then
+        if find_mingw_qmake >/dev/null; then
+            log "Found mingw Qt qmake: $(find_mingw_qmake) (ALLOW_MXE_QT=1)"
+            return 0
+        fi
+        log "Qt for mingw not found — installing GUI dependencies"
+        if install_mxe_qt && find_mingw_qmake >/dev/null; then
+            log "MXE Qt ready: $(find_mingw_qmake)"
+            return 0
+        fi
+        warn "MXE Qt install unavailable; building qtbase from source"
+        build_qt_from_source
+        find_mingw_qmake >/dev/null || die "Failed to provision Qt for Windows GUI"
         return 0
     fi
-    log "Qt for mingw not found — installing GUI dependencies"
-    if install_mxe_qt && find_mingw_qmake >/dev/null; then
-        log "MXE Qt ready: $(find_mingw_qmake)"
-        return 0
-    fi
-    warn "MXE Qt install unavailable; building qtbase from source"
-    build_qt_from_source
-    find_mingw_qmake >/dev/null || die "Failed to provision Qt for Windows GUI"
+    ensure_schannel_qt
 }
 
 # ---------- builds ----------
@@ -772,7 +817,12 @@ build_gui() {
     fi
 
     local qmake_bin
-    qmake_bin="$(find_mingw_qmake)" || die "mingw Qt qmake missing after ensure_qt"
+    if [[ "${ALLOW_MXE_QT:-0}" == "1" ]]; then
+        qmake_bin="$(find_mingw_qmake)" || die "mingw Qt qmake missing after ensure_qt"
+    else
+        qmake_bin="$DEPS/qt/bin/qmake"
+        [[ -x "$qmake_bin" ]] || die "Schannel Qt qmake missing at $qmake_bin (needed for OpenSSL ${OPENSSL_VER})"
+    fi
 
     log "Building Windows GUI (RNRC-qt.exe) with $qmake_bin"
     # Ensure MXE tools are on PATH when using MXE qmake
@@ -802,30 +852,20 @@ build_gui() {
     [[ -n "$host_lrelease" ]] || die "Host lrelease missing (install qttools5-dev-tools)"
     log "Using host lrelease: $host_lrelease"
 
-    # OpenSSL for the GUI:
-    # - Schannel Qt (DEPS): wallet crypto uses depends/ OpenSSL 3
-    # - MXE Qt: QtNetwork was built against MXE OpenSSL 1.1; linking depends/
-    #   OpenSSL 3 yields undefined refs (SSL_get_peer_certificate, EVP_PKEY_base_id).
-    #   Use MXE OpenSSL for headers+libs and put its -L ahead of depends/.
+    # Always link wallet crypto against depends/ OpenSSL OPENSSL_VER (3.0.13).
+    # Do not fall back to MXE OpenSSL 1.1 — that is what made debug.log show
+    # "Using OpenSSL version OpenSSL 1.1.1i".
+    verify_openssl_deps
     local openssl_inc="$DEPS/include"
     local openssl_lib="$DEPS/lib"
     local qmake_lflags=(-static -static-libgcc -static-libstdc++)
     if [[ "$qmake_bin" == *"/mxe/"* ]]; then
-        local mxe_root="${MXE_PREFIX}/usr/${MXE_TARGET}"
-        if [[ ! -f "$mxe_root/lib/libssl.a" || ! -f "$mxe_root/lib/libcrypto.a" ]]; then
-            warn "MXE OpenSSL missing; installing mxe-${MXE_APT_ARCH}-w64-mingw32.static-openssl"
-            setup_mxe_apt || true
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-                "mxe-${MXE_APT_ARCH}-w64-mingw32.static-openssl" || true
+        if [[ "${ALLOW_MXE_QT:-0}" != "1" ]]; then
+            die "Refusing MXE Qt without ALLOW_MXE_QT=1 (would pull OpenSSL 1.1 into the wallet)"
         fi
-        [[ -f "$mxe_root/lib/libssl.a" ]] || die "MXE libssl.a missing under $mxe_root/lib (needed for MXE Qt Network)"
-        [[ -f "$mxe_root/include/openssl/ssl.h" ]] || die "MXE OpenSSL headers missing under $mxe_root/include"
-        openssl_inc="$mxe_root/include"
-        openssl_lib="$mxe_root/lib"
-        # Prepend MXE -L so -lssl/-lcrypto resolve to 1.1 before depends/ OpenSSL 3
-        qmake_lflags=("-L${mxe_root}/lib" "${qmake_lflags[@]}")
-        log "MXE Qt detected: using MXE OpenSSL at $mxe_root (not depends/ OpenSSL 3)"
+        warn "ALLOW_MXE_QT=1: linking OpenSSL ${OPENSSL_VER} from depends/ against MXE Qt — may fail if QtNetwork needs OpenSSL 1.1"
     fi
+    log "GUI OpenSSL: ${openssl_inc} / ${openssl_lib} (expect ${OPENSSL_VER})"
 
     local qmake_args=(
         "USE_UPNP=-"
@@ -898,6 +938,16 @@ build_gui() {
     fi
     file "$RELEASE_DIR/RNRC-qt.exe" || true
     verify_no_mingw_runtime_dlls "$RELEASE_DIR/RNRC-qt.exe"
+    # Confirm the static OpenSSL version string is the expected 3.0.13 (not 1.1.1i).
+    if command -v strings >/dev/null 2>&1; then
+        if strings "$RELEASE_DIR/RNRC-qt.exe" | grep -q "OpenSSL ${OPENSSL_VER}"; then
+            log "Verified RNRC-qt.exe embeds OpenSSL ${OPENSSL_VER}"
+        elif strings "$RELEASE_DIR/RNRC-qt.exe" | grep -qE 'OpenSSL 1\.1\.'; then
+            die "RNRC-qt.exe still embeds OpenSSL 1.1.x — rebuild with Schannel Qt + depends/ OpenSSL ${OPENSSL_VER}"
+        else
+            warn "Could not find 'OpenSSL ${OPENSSL_VER}' string in RNRC-qt.exe (strip may have removed it)"
+        fi
+    fi
 }
 
 main() {

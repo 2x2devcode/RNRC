@@ -69,16 +69,20 @@ That avoids Qt configure failing with:
   ERROR: Feature 'openssl-linked' was enabled, but the pre-condition
   '... libs.openssl' failed.
 
-Wallet crypto still links OpenSSL via `RNRC-qt.pro` (`-lssl -lcrypto`).
-Set `QT_USE_OPENSSL=1` only if you need OpenSSL inside Qt itself.
+Wallet crypto still links OpenSSL via `RNRC-qt.pro` (`-lssl -lcrypto`) and
+must use **depends/ OpenSSL 3.0.13** (`OPENSSL_VER`, default). Set
+`QT_USE_OPENSSL=1` only if you need OpenSSL inside Qt itself.
 
-If you use **MXE Qt** (openssl-linked QtNetwork), the script links the GUI
-against **MXE OpenSSL 1.1**, not `depends/` OpenSSL 3. Mixing them produces:
+By default the script **refuses MXE Qt** for the wallet GUI: MXE QtNetwork is
+typically linked against OpenSSL 1.1 and made `debug.log` report
+`Using OpenSSL version OpenSSL 1.1.1i`. It builds (or reuses) a Schannel Qt
+under `depends/.../qt` and always passes `OPENSSL_*` from depends/ 3.0.13.
+
+`ALLOW_MXE_QT=1` restores the old MXE fallback (not recommended). Mixing MXE
+QtNetwork (OpenSSL 1.1) with depends/ OpenSSL 3 can produce:
 
   undefined reference to `SSL_get_peer_certificate'
   undefined reference to `EVP_PKEY_base_id'
-
-A Schannel-built Qt under `depends/.../qt` is preferred when present.
 
 After a failed Qt configure/build, clean and re-run:
 

@@ -227,7 +227,9 @@ The script will:
 BUILD_GUI=0         # CLI only (skips Qt)
 JOBS=8              # parallel make jobs
 DEPS_DIR=/tmp/deps  # custom dependency prefix
+OPENSSL_VER=3.0.13  # wallet crypto OpenSSL (default 3.0.13; not 1.1.1i)
 QT_USE_OPENSSL=1    # link OpenSSL into Qt (default: Schannel)
+ALLOW_MXE_QT=1      # allow MXE Qt fallback (not recommended; pulls OpenSSL 1.1)
 ```
 
 #### Build logs

@@ -443,8 +443,8 @@ macx:QMAKE_LFLAGS_THREAD += -pthread
 macx:QMAKE_CXXFLAGS_THREAD += -pthread
 
 # Set libraries and includes at end, to use platform-defined defaults if not overridden.
-# OPENSSL_* paths come first so a MXE OpenSSL 1.1 tree wins over depends/ OpenSSL 3
-# when both are visible (MXE Qt Network requires the 1.1 ABI).
+# OPENSSL_* must point at OpenSSL 3.0.x (see compile-windows.sh OPENSSL_VER). Do not
+# prepend an MXE OpenSSL 1.1 tree — that made debug.log report OpenSSL 1.1.1i.
 INCLUDEPATH += $$OPENSSL_INCLUDE_PATH $$BOOST_INCLUDE_PATH $$BDB_INCLUDE_PATH $$QRENCODE_INCLUDE_PATH
 LIBS += $$join(OPENSSL_LIB_PATH,,-L,) $$join(BOOST_LIB_PATH,,-L,) $$join(BDB_LIB_PATH,,-L,) $$join(QRENCODE_LIB_PATH,,-L,)
 LIBS += -lssl -lcrypto -ldb_cxx$$BDB_LIB_SUFFIX
