@@ -1358,21 +1358,16 @@ static unsigned __stdcall BitcoinThreadTrampoline(void* p)
 bool NewThread(void(*pfn)(void*), void* parg)
 {
 #ifdef WIN32
-    // MinGW/boost historically used CreateThread without CRT TLS init and with
-    // a small default stack. Validating the first proof-of-stake coinstake
-    // (block ~30: multi-input CheckTransaction/serialization) then AVs with
-    // c0000005 on the message-handler worker. Use CRT _beginthreadex and a
-    // 16 MiB stack so IBD can pass the PoW→PoS transition on Windows GUI.
+    // MinGW CreateThread without CRT TLS init AVs on first PoS validation.
+    // Use _beginthreadex. Pass stack_size=0 so the PE --stack reserve from
+    // the linker (32 MiB) applies to every worker — explicit large values
+    // with STACK_SIZE_PARAM_IS_A_RESERVATION have been unreliable across
+    // MinGW CRT versions (v1.0.1.3–1.0.1.4 still crashed at height ~30).
     ThreadStart* start = new ThreadStart;
     start->pfn = pfn;
     start->parg = parg;
 
-    const unsigned nStackBytes = 16u * 1024u * 1024u;
-    // STACK_SIZE_PARAM_IS_A_RESERVATION (0x10000): treat nStackBytes as reserve
-    // size so Windows actually gives the worker 16 MiB (otherwise large values
-    // may be ignored / only commit the default ~1 MiB).
-    uintptr_t h = _beginthreadex(NULL, nStackBytes, BitcoinThreadTrampoline, start,
-                                 0x10000 /* STACK_SIZE_PARAM_IS_A_RESERVATION */, NULL);
+    uintptr_t h = _beginthreadex(NULL, 0, BitcoinThreadTrampoline, start, 0, NULL);
     if (!h)
     {
         delete start;

@@ -463,13 +463,25 @@ bool CKey::SetCompactSignature(uint256 hash, const std::vector<unsigned char>& v
 
 bool CKey::Verify(uint256 hash, const std::vector<unsigned char>& vchSig)
 {
-    if (!pkey || vchSig.empty())
-        return false;
-    // -1 = error, 0 = bad sig, 1 = good
-    if (ECDSA_verify(0, (unsigned char*)&hash, sizeof(hash), &vchSig[0], vchSig.size(), pkey) != 1)
+    // MinGW/OpenSSL 1.1: ECDSA_verify() has AVd (c0000005) on some Windows
+    // workers when given non-DER or trailing-garbage signatures. Parse first
+    // with d2i_ECDSA_SIG and verify with ECDSA_do_verify instead.
+    if (!pkey || !fSet || vchSig.empty() || vchSig.size() > 72)
         return false;
 
-    return true;
+    const unsigned char* pbegin = &vchSig[0];
+    ECDSA_SIG* sig = d2i_ECDSA_SIG(NULL, &pbegin, (long)vchSig.size());
+    if (!sig)
+        return false;
+    // Reject trailing garbage after the DER encoding.
+    if (pbegin != &vchSig[0] + vchSig.size()) {
+        ECDSA_SIG_free(sig);
+        return false;
+    }
+
+    int ret = ECDSA_do_verify((unsigned char*)&hash, sizeof(hash), sig, pkey);
+    ECDSA_SIG_free(sig);
+    return ret == 1;
 }
 
 bool CKey::IsValid()
