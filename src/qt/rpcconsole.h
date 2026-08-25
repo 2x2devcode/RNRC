@@ -7,6 +7,8 @@ namespace Ui {
     class RPCConsole;
 }
 class ClientModel;
+class PeerTableModel;
+class BanTableModel;
 
 /** Local Bitcoin RPC console. */
 class RPCConsole: public QDialog
@@ -29,6 +31,8 @@ public:
 
 protected:
     virtual bool eventFilter(QObject* obj, QEvent *event);
+    virtual void showEvent(QShowEvent *event);
+    virtual void hideEvent(QHideEvent *event);
 
 private slots:
     void on_lineEdit_returnPressed();
@@ -57,6 +61,8 @@ signals:
 private:
     Ui::RPCConsole *ui;
     ClientModel *clientModel;
+    PeerTableModel *peerModel;
+    BanTableModel *banModel;
     QStringList history;
     int historyPtr;
 

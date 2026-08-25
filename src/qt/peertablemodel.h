@@ -11,17 +11,13 @@
 class ClientModel;
 
 /**
- * Qt table model that exposes the list of currently connected P2P peers.
- * Refreshed automatically by an internal timer (MODEL_UPDATE_DELAY ms).
+ * Qt table model for connected P2P peers.
  *
  * Columns:
- *   0  Address     – IP:port of the peer
- *   1  User Agent  – client software string reported by the peer
- *   2  Version     – protocol version number
- *   3  Direction   – "Inbound" or "Outbound"
- *   4  Connected   – duration since the connection was established
- *   5  Start Block – block height at which the peer joined
- *   6  Ban Score   – current misbehaviour penalty score
+ *   0  NodeId       – stable connection id
+ *   1  Address      – Node/Service (IP:port)
+ *   2  User Agent   – peer subver string
+ *   3  Ping         – last measured round-trip (ms)
  */
 class PeerTableModel : public QAbstractTableModel
 {
@@ -29,20 +25,16 @@ class PeerTableModel : public QAbstractTableModel
 
 public:
     enum ColumnIndex {
-        Address     = 0,
-        UserAgent   = 1,
-        Version     = 2,
-        Direction   = 3,
-        Connected   = 4,
-        StartHeight = 5,
-        BanScore    = 6,
-        NumColumns  = 7
+        NodeId      = 0,
+        Address     = 1,
+        UserAgent   = 2,
+        Ping        = 3,
+        NumColumns  = 4
     };
 
     explicit PeerTableModel(ClientModel *parent = 0);
     ~PeerTableModel();
 
-    // QAbstractTableModel interface
     int rowCount(const QModelIndex &parent = QModelIndex()) const;
     int columnCount(const QModelIndex &parent = QModelIndex()) const;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
@@ -50,7 +42,6 @@ public:
                         int role = Qt::DisplayRole) const;
     Qt::ItemFlags flags(const QModelIndex &index) const;
 
-    /** Return the CNodeStats for the peer at the given row, or NULL. */
     const CNodeStats *nodeStats(int row) const;
 
     void startAutoRefresh();

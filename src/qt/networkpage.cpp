@@ -146,13 +146,10 @@ void NetworkPage::setClientModel(ClientModel *model)
     proxyModel->setSortCaseSensitivity(Qt::CaseInsensitive);
     peersTable->setModel(proxyModel);
     peersTable->sortByColumn(PeerTableModel::Address, Qt::AscendingOrder);
-    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::Address,    QHeaderView::Stretch);
-    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::UserAgent,  QHeaderView::ResizeToContents);
-    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::Version,    QHeaderView::ResizeToContents);
-    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::Direction,  QHeaderView::ResizeToContents);
-    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::Connected,  QHeaderView::ResizeToContents);
-    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::StartHeight,QHeaderView::ResizeToContents);
-    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::BanScore,   QHeaderView::ResizeToContents);
+    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::NodeId,     QHeaderView::ResizeToContents);
+    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::Address,   QHeaderView::Stretch);
+    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::UserAgent, QHeaderView::ResizeToContents);
+    peersTable->horizontalHeader()->setResizeMode(PeerTableModel::Ping,      QHeaderView::ResizeToContents);
 
     // Connections: may refresh peer rows (skipped during IBD).
     // Blocks: labels + seed dots only — never reset the peer model.

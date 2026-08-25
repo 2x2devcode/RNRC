@@ -217,6 +217,24 @@ inline int OutputDebugStringF(const char* pszFormat, ...)
                     setbuf(fileout, NULL); // unbuffered
             }
 
+            // Periodically shrink while running so long sessions do not fill the disk.
+            static int nLinesSinceShrink = 0;
+            if (GetBoolArg("-shrinkdebugfile", !fDebug) && ++nLinesSinceShrink >= 500) {
+                nLinesSinceShrink = 0;
+                long pos = ftell(fileout);
+                if (pos > 2 * 1000 * 1000) {
+                    fflush(fileout);
+                    fclose(fileout);
+                    fileout = NULL;
+                    ShrinkDebugFile();
+                    boost::filesystem::path pathDebug = GetDataDir() / "debug.log";
+                    fileout = fopen(pathDebug.string().c_str(), "a");
+                    if (fileout) setbuf(fileout, NULL);
+                }
+            }
+            if (!fileout)
+                return ret;
+
             // Debug print useful for profiling
             if (fLogTimestamps && fStartedNewLine)
                 fprintf(fileout, "%s ", DateTimeStrFormat("%x %H:%M:%S", GetTime()).c_str());
@@ -1137,23 +1155,37 @@ void FileCommit(FILE *fileout)
 
 void ShrinkDebugFile()
 {
-    // Scroll debug.log if it's getting too big
-    boost::filesystem::path pathLog = GetDataDir() / "debug.log";
-    FILE* file = fopen(pathLog.string().c_str(), "r");
-    if (file && boost::filesystem::file_size(pathLog) > 10 * 1000000)
-    {
-        // Restart the file with some of the end
-        char pch[200000];
-        fseek(file, -sizeof(pch), SEEK_END);
-        int nBytes = fread(pch, 1, sizeof(pch), file);
-        fclose(file);
+    // Keep debug.log small: truncate when over ~2 MiB, retain the last ~256 KiB.
+    // (Previously 10 MiB / 200 KiB — logs grew large on disk during long IBD/staking.)
+    static const boost::uintmax_t nMaxSize = 2 * 1000 * 1000;
+    static const size_t nKeep = 256 * 1000;
 
-        file = fopen(pathLog.string().c_str(), "w");
-        if (file)
-        {
-            fwrite(pch, 1, nBytes, file);
-            fclose(file);
-        }
+    boost::filesystem::path pathLog = GetDataDir() / "debug.log";
+    boost::system::error_code ec;
+    boost::uintmax_t nSize = boost::filesystem::file_size(pathLog, ec);
+    if (ec || nSize <= nMaxSize)
+        return;
+
+    FILE* file = fopen(pathLog.string().c_str(), "rb");
+    if (!file)
+        return;
+
+    size_t nRead = nKeep;
+    if (nSize < nRead)
+        nRead = (size_t)nSize;
+    std::vector<char> pch(nRead);
+    if (fseek(file, -((long)nRead), SEEK_END) != 0) {
+        fclose(file);
+        return;
+    }
+    size_t nBytes = fread(&pch[0], 1, nRead, file);
+    fclose(file);
+
+    file = fopen(pathLog.string().c_str(), "wb");
+    if (file)
+    {
+        fwrite(&pch[0], 1, nBytes, file);
+        fclose(file);
     }
 }
 
