@@ -67,7 +67,14 @@ By default Qt Network uses Windows **Schannel** (`-schannel -no-openssl`).
 That avoids Qt configure failing with:
 
   ERROR: Feature 'openssl-linked' was enabled, but the pre-condition
-  '... libs.openssl' failed.
+    '... libs.openssl' failed.
+
+MinGW `ld` on Linux is case-sensitive. Qt Network may emit `-lSecur32`
+/`-lCrypt32` while the import libs are `libsecur32.a` / `libcrypt32.a`.
+`compile-windows.sh` installs PascalCase aliases under
+`depends/.../lib/win32-case` (and `depends/.../lib`) before the GUI link.
+If you see `cannot find -lSecur32`, re-run the script (no full Qt rebuild
+needed); it refreshes those aliases on every GUI build.
 
 Wallet crypto still links OpenSSL via `RNRC-qt.pro` (`-lssl -lcrypto`) and
 must use **depends/ OpenSSL 3.0.13** (`OPENSSL_VER`, default). Set
