@@ -2028,9 +2028,29 @@ bool CBlock::CheckBlock(bool fCheckPOW, bool fCheckMerkleRoot, bool fCheckSig) c
     // These are checks that are independent of context
     // that can be verified before saving an orphan block.
 
-    // Size limits
-    if (vtx.empty() || vtx.size() > MAX_BLOCK_SIZE || ::GetSerializeSize(*this, SER_NETWORK, PROTOCOL_VERSION) > MAX_BLOCK_SIZE)
+    const bool fPoS = IsProofOfStake();
+    if (fPoS)
+        printf("CheckBlock: enter PoS vtx=%u fCheckSig=%d\n",
+               (unsigned)vtx.size(), fCheckSig ? 1 : 0);
+
+    // Size limits — check per-tx first (avoids one huge re-serialize of the
+    // whole block on the message-handler stack before any PoS breadcrumbs).
+    if (vtx.empty() || vtx.size() > MAX_BLOCK_SIZE)
         return DoS(100, error("CheckBlock() : size limits failed"));
+
+    unsigned int nBlockSize = 80; // header
+    nBlockSize += vchBlockSig.size();
+    BOOST_FOREACH(const CTransaction& tx, vtx)
+    {
+        unsigned int nTxSize = ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION);
+        if (nTxSize > MAX_BLOCK_SIZE)
+            return DoS(100, error("CheckBlock() : size limits failed"));
+        nBlockSize += nTxSize;
+        if (nBlockSize > MAX_BLOCK_SIZE)
+            return DoS(100, error("CheckBlock() : size limits failed"));
+    }
+    if (fPoS)
+        printf("CheckBlock: size ok (~%u bytes)\n", nBlockSize);
 
     // Check proof of work matches claimed amount
     if (fCheckPOW && IsProofOfWork() && !CheckProofOfWork(GetPoWHash(), nBits))
@@ -2051,14 +2071,15 @@ bool CBlock::CheckBlock(bool fCheckPOW, bool fCheckMerkleRoot, bool fCheckSig) c
     if (GetBlockTime() > FutureDrift((int64_t)vtx[0].nTime))
         return DoS(50, error("CheckBlock() : coinbase timestamp is too early"));
 
-    if (IsProofOfStake())
+    if (fPoS)
     {
+        printf("CheckBlock: PoS structure checks\n");
         // Coinbase output should be empty if proof-of-stake block
         if (vtx[0].vout.size() != 1 || !vtx[0].vout[0].IsEmpty())
             return DoS(100, error("CheckBlock() : coinbase output not empty for proof-of-stake block"));
 
         // Second transaction must be coinstake, the rest must not be
-        if (vtx.empty() || !vtx[1].IsCoinStake())
+        if (vtx.size() < 2 || !vtx[1].IsCoinStake())
             return DoS(100, error("CheckBlock() : second tx is not coinstake"));
         for (unsigned int i = 2; i < vtx.size(); i++)
             if (vtx[i].IsCoinStake())
@@ -2069,16 +2090,15 @@ bool CBlock::CheckBlock(bool fCheckPOW, bool fCheckMerkleRoot, bool fCheckSig) c
             return DoS(50, error("CheckBlock() : coinstake timestamp violation nTimeBlock=%"PRId64" nTimeTx=%u", GetBlockTime(), vtx[1].nTime));
 
         // Block signature is verified in AcceptBlock (after first-PoS logging).
-        // Doing ECDSA+scrypt GetHash here during IBD on Windows workers was a
-        // consistent c0000005 crash site before AcceptBlock could log.
         if (fCheckSig && !CheckBlockSignature())
             return DoS(100, error("CheckBlock() : bad proof-of-stake block signature"));
+        printf("CheckBlock: PoS structure ok vin=%u vout=%u\n",
+               (unsigned)vtx[1].vin.size(), (unsigned)vtx[1].vout.size());
     }
 
     // Check transactions
-    if (IsProofOfStake())
-        printf("CheckBlock: CheckTransaction loop (PoS) vtx=%"PRIszu" coinstake vin=%"PRIszu"\n",
-               vtx.size(), vtx.size() > 1 ? vtx[1].vin.size() : 0);
+    if (fPoS)
+        printf("CheckBlock: CheckTransaction loop (PoS)\n");
     BOOST_FOREACH(const CTransaction& tx, vtx)
     {
         if (!tx.CheckTransaction())
@@ -2088,7 +2108,7 @@ bool CBlock::CheckBlock(bool fCheckPOW, bool fCheckMerkleRoot, bool fCheckSig) c
         if (GetBlockTime() < (int64_t)tx.nTime)
             return DoS(50, error("CheckBlock() : block timestamp earlier than transaction timestamp"));
     }
-    if (IsProofOfStake())
+    if (fPoS)
         printf("CheckBlock: CheckTransaction ok (PoS)\n");
 
     // Check for duplicate txids. This is caught by ConnectInputs(),
@@ -2113,7 +2133,8 @@ bool CBlock::CheckBlock(bool fCheckPOW, bool fCheckMerkleRoot, bool fCheckSig) c
     if (fCheckMerkleRoot && hashMerkleRoot != BuildMerkleTree())
         return DoS(100, error("CheckBlock() : hashMerkleRoot mismatch"));
 
-
+    if (fPoS)
+        printf("CheckBlock: done PoS ok\n");
     return true;
 }
 
@@ -2125,7 +2146,9 @@ bool CBlock::AcceptBlock()
         return DoS(100, error("AcceptBlock() : reject unknown block version %d", nVersion));
 
     // Check for duplicate
+    printf("AcceptBlock: GetHash fPoS=%d\n", IsProofOfStake() ? 1 : 0);
     uint256 hash = GetHash();
+    printf("AcceptBlock: hash=%s\n", hash.ToString().substr(0,20).c_str());
     if (mapBlockIndex.count(hash))
         return error("AcceptBlock() : block already in mapBlockIndex");
 
@@ -2162,9 +2185,9 @@ bool CBlock::AcceptBlock()
     {
         // Log the chain's first PoS block (height ~30 on mainnet) once.
         if (GetLastBlockIndex(pindexPrev, true) == NULL)
-            printf("AcceptBlock: first proof-of-stake block height=%d hash=%s vin=%"PRIszu" vout=%"PRIszu"\n",
+            printf("AcceptBlock: first proof-of-stake block height=%d hash=%s vin=%u vout=%u\n",
                    nHeight, hash.ToString().c_str(),
-                   vtx[1].vin.size(), vtx[1].vout.size());
+                   (unsigned)vtx[1].vin.size(), (unsigned)vtx[1].vout.size());
 
         printf("AcceptBlock: PoS CheckBlockSignature height=%d\n", nHeight);
         if (!CheckBlockSignature())
@@ -2253,8 +2276,14 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
 {
     AssertLockHeld(cs_main);
 
-    // Check for duplicate
+    // Check for duplicate — reuse hash already computed by caller when possible
+    // by hashing once here and logging before any PoS-specific work.
+    printf("ProcessBlock: hashing\n");
     uint256 hash = pblock->GetHash();
+    printf("ProcessBlock: enter %s fPoS=%d vtx=%u\n",
+           hash.ToString().substr(0,20).c_str(),
+           pblock->IsProofOfStake() ? 1 : 0,
+           (unsigned)pblock->vtx.size());
     if (mapBlockIndex.count(hash))
         return error("ProcessBlock() : already have block %d %s", mapBlockIndex[hash]->nHeight, hash.ToString().substr(0,20).c_str());
     if (mapOrphanBlocks.count(hash))
@@ -2263,13 +2292,20 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
     // ppcoin: check proof-of-stake
     // Limited duplicity on stake: prevents block flood attack
     // Duplicate stake allowed only when there is orphan child block
-    if (pblock->IsProofOfStake() && setStakeSeen.count(pblock->GetProofOfStake()) && !mapOrphanBlocksByPrev.count(hash) && !Checkpoints::WantedByPendingSyncCheckpoint(hash))
-        return error("ProcessBlock() : duplicate proof-of-stake (%s, %d) for block %s", pblock->GetProofOfStake().first.ToString().c_str(), pblock->GetProofOfStake().second, hash.ToString().c_str());
+    if (pblock->IsProofOfStake())
+    {
+        if (pblock->vtx.size() < 2 || pblock->vtx[1].vin.empty())
+            return error("ProcessBlock() : proof-of-stake block missing coinstake input");
+        if (setStakeSeen.count(pblock->GetProofOfStake()) && !mapOrphanBlocksByPrev.count(hash) && !Checkpoints::WantedByPendingSyncCheckpoint(hash))
+            return error("ProcessBlock() : duplicate proof-of-stake (%s, %d) for block %s", pblock->GetProofOfStake().first.ToString().c_str(), pblock->GetProofOfStake().second, hash.ToString().c_str());
+    }
 
     // Preliminary checks (skip block ECDSA here — done in AcceptBlock after
     // first-PoS logging so Windows IBD crashes leave a breadcrumb).
+    printf("ProcessBlock: CheckBlock begin\n");
     if (!pblock->CheckBlock(true, true, false))
         return error("ProcessBlock() : CheckBlock FAILED");
+    printf("ProcessBlock: CheckBlock ok\n");
 
     CBlockIndex* pcheckpoint = Checkpoints::GetLastSyncCheckpoint();
     if (pcheckpoint && pblock->hashPrevBlock != hashBestChain && !Checkpoints::WantedByPendingSyncCheckpoint(hash))
@@ -2425,14 +2461,16 @@ bool CBlock::CheckBlockSignature() const
         return error("CheckBlockSignature() : missing coinstake");
     if (vtx[1].vout.size() < 2)
         return error("CheckBlockSignature() : coinstake vout too short");
-    if (vchBlockSig.empty())
-        return error("CheckBlockSignature() : empty block signature");
+    if (vchBlockSig.empty() || vchBlockSig.size() > 72)
+        return error("CheckBlockSignature() : empty or oversized block signature");
 
     vector<valtype> vSolutions;
     txnouttype whichType;
 
     const CTxOut& txout = vtx[1].vout[1];
 
+    printf("CheckBlockSignature: Solver scriptPubKey=%u bytes sig=%u\n",
+           (unsigned)txout.scriptPubKey.size(), (unsigned)vchBlockSig.size());
     if (!Solver(txout.scriptPubKey, whichType, vSolutions))
         return error("CheckBlockSignature() : Solver failed");
 
@@ -2440,11 +2478,16 @@ bool CBlock::CheckBlockSignature() const
     {
         if (vSolutions.empty() || vSolutions[0].empty())
             return error("CheckBlockSignature() : empty pubkey solution");
-        valtype& vchPubKey = vSolutions[0];
+        // Copy pubkey bytes — do not pass a reference into a temporary CPubKey
+        // that aliases Solver output while OpenSSL walks the buffer.
+        CPubKey pubkey(vSolutions[0]);
         CKey key;
-        if (!key.SetPubKey(vchPubKey))
+        if (!key.SetPubKey(pubkey))
             return error("CheckBlockSignature() : SetPubKey failed");
-        return key.Verify(GetHash(), vchBlockSig);
+        printf("CheckBlockSignature: Verify begin\n");
+        bool fOk = key.Verify(GetHash(), vchBlockSig);
+        printf("CheckBlockSignature: Verify %s\n", fOk ? "ok" : "failed");
+        return fOk;
     }
 
     return error("CheckBlockSignature() : unsupported script type %d", (int)whichType);

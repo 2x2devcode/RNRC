@@ -54,6 +54,8 @@ QMAKE_LFLAGS *= -fstack-protector-all --param ssp-buffer-size=1
 }
 # for extra security on Windows: enable ASLR and DEP via GCC linker flags
 win32:QMAKE_LFLAGS *= -Wl,--dynamicbase -Wl,--nxcompat
+# Default stack for main + NewThread(stack=0) workers (first PoS IBD).
+win32:QMAKE_LFLAGS += -Wl,--stack,33554432
 # Fully static MinGW runtime so the .exe does not need libwinpthread-1.dll /
 # libgcc_s_seh-1.dll / libstdc++-6.dll next to it on the target PC.
 win32:QMAKE_LFLAGS += -static -static-libgcc -static-libstdc++

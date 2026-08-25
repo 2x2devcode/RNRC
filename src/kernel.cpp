@@ -333,8 +333,11 @@ bool CheckProofOfStake(const CTransaction& tx, unsigned int nBits, uint256& hash
         return error("CheckProofOfStake() : called on non-coinstake %s", tx.GetHash().ToString().c_str());
 
     // Kernel (input 0) must match the stake hash target per coin age (nBits)
+    if (tx.vin.empty())
+        return error("CheckProofOfStake() : coinstake vin empty");
     const CTxIn& txin = tx.vin[0];
 
+    printf("CheckProofOfStake: read txPrev\n");
     // First try finding the previous transaction in database
     CTxDB txdb("r");
     CTransaction txPrev;
@@ -343,17 +346,21 @@ bool CheckProofOfStake(const CTransaction& tx, unsigned int nBits, uint256& hash
         return tx.DoS(1, error("CheckProofOfStake() : INFO: read txPrev failed"));  // previous transaction not in main chain, may occur during initial download
 
     // Verify signature
+    printf("CheckProofOfStake: VerifySignature\n");
     if (!VerifySignature(txPrev, tx, 0, 0))
         return tx.DoS(100, error("CheckProofOfStake() : VerifySignature failed on coinstake %s", tx.GetHash().ToString().c_str()));
 
     // Read block header
+    printf("CheckProofOfStake: read kernel block\n");
     CBlock block;
     if (!block.ReadFromDisk(txindex.pos.nFile, txindex.pos.nBlockPos, false))
         return fDebug? error("CheckProofOfStake() : read block failed") : false; // unable to read block of previous transaction
 
+    printf("CheckProofOfStake: CheckStakeKernelHash\n");
     if (!CheckStakeKernelHash(nBits, block, txindex.pos.nTxPos - txindex.pos.nBlockPos, txPrev, txin.prevout, tx.nTime, hashProofOfStake, targetProofOfStake, fDebug))
         return tx.DoS(1, error("CheckProofOfStake() : INFO: check kernel failed on coinstake %s, hashProof=%s", tx.GetHash().ToString().c_str(), hashProofOfStake.ToString().c_str())); // may occur during initial download or if behind on block chain sync
 
+    printf("CheckProofOfStake: ok\n");
     return true;
 }
 

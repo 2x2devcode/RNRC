@@ -846,8 +846,9 @@ build_gui() {
         # Force fully static MinGW runtime (no libstdc++-6.dll / libwinpthread-1.dll).
         # Omit -lgcc_eh: MXE GCC 5.5 has no libgcc_eh.a (-static-libgcc is enough).
         "QMAKE_LFLAGS+=${qmake_lflags[*]}"
-        # Main-thread stack 16 MiB (worker threads set via _beginthreadex).
-        "QMAKE_LFLAGS+=-Wl,--stack,16777216"
+        # PE stack 32 MiB — NewThread uses _beginthreadex(..., stack=0) so
+        # workers inherit this reserve (needed for first PoS IBD on Windows).
+        "QMAKE_LFLAGS+=-Wl,--stack,33554432"
         "LIBS+=-Wl,-Bstatic -lstdc++ -lwinpthread -lpthread"
         "QMAKE_LRELEASE=${host_lrelease}"
     )
