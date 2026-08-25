@@ -711,7 +711,83 @@ build_qt_from_source() {
     fi
 
     verify_file "$DEPS/qt/bin/qmake" "Qt qmake not installed"
+    fix_mingw_schannel_lib_case
     touch "$marker"
+}
+
+# MinGW ld on Linux is case-sensitive. Qt Network (Schannel) emits -lSecur32 /
+# -lCrypt32, but the import libs are libsecur32.a / libcrypt32.a. Without
+# aliases the GUI link fails with: cannot find -lSecur32 / -lCrypt32.
+fix_mingw_schannel_lib_case() {
+    local case_dir="$DEPS/lib/win32-case"
+    mkdir -p "$case_dir"
+
+    resolve_mingw_lib() {
+        local name="$1" # e.g. secur32
+        local path=""
+        if need_cmd "${TARGET}-g++"; then
+            path="$("${TARGET}-g++" -print-file-name="lib${name}.a" 2>/dev/null || true)"
+        fi
+        if [[ -z "$path" || "$path" == "lib${name}.a" || ! -f "$path" ]]; then
+            for d in \
+                "/usr/${TARGET}/lib" \
+                "/usr/lib/gcc/${TARGET}"/*/ \
+                "${MXE_PREFIX}/usr/${MXE_TARGET}/lib"
+            do
+                if [[ -f "${d}/lib${name}.a" ]]; then
+                    path="${d}/lib${name}.a"
+                    break
+                fi
+            done
+        fi
+        [[ -n "$path" && -f "$path" ]] || return 1
+        printf '%s\n' "$path"
+    }
+
+    local lower upper src
+    # PascalCase (Qt) -> lowercase (MinGW import lib)
+    for lower in secur32 crypt32 ncrypt bcrypt; do
+        upper="$(printf '%s' "$lower" | sed 's/^./\U&/')"
+        # Special-case well-known Windows API spellings Qt uses:
+        case "$lower" in
+            secur32) upper=Secur32 ;;
+            crypt32) upper=Crypt32 ;;
+            ncrypt)  upper=Ncrypt ;;
+            bcrypt)  upper=Bcrypt ;;
+        esac
+        src="$(resolve_mingw_lib "$lower" || true)"
+        if [[ -z "$src" ]]; then
+            warn "MinGW lib${lower}.a not found — Schannel link may fail for -l${upper}"
+            continue
+        fi
+        ln -sfn "$src" "${case_dir}/lib${upper}.a"
+        ln -sfn "$src" "${case_dir}/lib${lower}.a"
+        # Also alias under $DEPS/lib — already early on the GUI link -L path.
+        mkdir -p "$DEPS/lib"
+        ln -sfn "$src" "${DEPS}/lib/lib${upper}.a"
+        log "win32-case: lib${upper}.a -> $src"
+    done
+
+    # Rewrite Qt module metadata so future qmake runs prefer lowercase too.
+    local f
+    shopt -s nullglob
+    for f in \
+        "$DEPS/qt/lib"/libQt5Network*.prl \
+        "$DEPS/qt/lib/pkgconfig"/Qt5Network*.pc \
+        "$DEPS/qt/mkspecs/modules"/qt_lib_network*.pri
+    do
+        [[ -f "$f" ]] || continue
+        if grep -qE -- '-l(Secur32|Crypt32|Ncrypt|Bcrypt)' "$f"; then
+            sed -i \
+                -e 's/-lSecur32/-lsecur32/g' \
+                -e 's/-lCrypt32/-lcrypt32/g' \
+                -e 's/-lNcrypt/-lncrypt/g' \
+                -e 's/-lBcrypt/-lbcrypt/g' \
+                "$f"
+            log "Normalized Schannel lib case in $(basename "$f")"
+        fi
+    done
+    shopt -u nullglob
 }
 
 find_mingw_qmake() {
@@ -856,6 +932,8 @@ build_gui() {
     # Do not fall back to MXE OpenSSL 1.1 — that is what made debug.log show
     # "Using OpenSSL version OpenSSL 1.1.1i".
     verify_openssl_deps
+    # Qt Schannel may still emit -lSecur32/-lCrypt32; provide MinGW case aliases.
+    fix_mingw_schannel_lib_case
     local openssl_inc="$DEPS/include"
     local openssl_lib="$DEPS/lib"
     local qmake_lflags=(-static -static-libgcc -static-libstdc++)
@@ -889,7 +967,8 @@ build_gui() {
         # PE stack 32 MiB — NewThread uses _beginthreadex(..., stack=0) so
         # workers inherit this reserve (needed for first PoS IBD on Windows).
         "QMAKE_LFLAGS+=-Wl,--stack,33554432"
-        "LIBS+=-Wl,-Bstatic -lstdc++ -lwinpthread -lpthread"
+        # Case-alias dir first so -lSecur32 resolves to libSecur32.a symlink.
+        "LIBS+=-L${DEPS}/lib/win32-case -Wl,-Bstatic -lstdc++ -lwinpthread -lpthread"
         "QMAKE_LRELEASE=${host_lrelease}"
     )
 
