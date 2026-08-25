@@ -3530,6 +3530,45 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
     }
 
 
+    else if (strCommand == "pong")
+    {
+        int64_t pingUsecEnd = GetTimeMillis() * 1000;
+        uint64_t nonce = 0;
+        size_t nAvail = vRecv.in_avail();
+        bool bPingFinished = false;
+        std::string sProblem;
+
+        if (nAvail >= sizeof(nonce))
+            vRecv >> nonce;
+
+        if (pfrom->nPingNonceSent != 0) {
+            if (nonce == pfrom->nPingNonceSent) {
+                bPingFinished = true;
+                int64_t pingUsecTime = pingUsecEnd - pfrom->nPingUsecStart;
+                if (pingUsecTime > 0) {
+                    pfrom->nPingUsecTime = pingUsecTime;
+                } else {
+                    sProblem = "Timing mishap";
+                }
+            } else {
+                sProblem = "Nonce mismatch";
+            }
+        } else {
+            sProblem = "Unsolicited pong without ping";
+        }
+
+        if (bPingFinished)
+            pfrom->nPingNonceSent = 0;
+        if (!sProblem.empty() && fDebug)
+            printf("pong peer=%s: %s, %x expected, %x received, %u bytes\n",
+                pfrom->addr.ToString().c_str(),
+                sProblem.c_str(),
+                (unsigned)pfrom->nPingNonceSent,
+                (unsigned)nonce,
+                (unsigned)nAvail);
+    }
+
+
     else if (strCommand == "alert")
     {
         CAlert alert;
@@ -3698,14 +3737,29 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         if (pto->nVersion == 0)
             return true;
 
-        // Keep-alive ping. We send a nonce of zero because we don't use it anywhere
-        // right now.
-        if (pto->nLastSend && GetTime() - pto->nLastSend > 30 * 60 && pto->vSendMsg.empty()) {
-            uint64_t nonce = 0;
-            if (pto->nVersion > BIP0031_VERSION)
+        // Latency / keep-alive pings (measured via pong handler into nPingUsecTime).
+        {
+            int64_t nNowUsec = GetTimeMillis() * 1000;
+            if (pto->nLastSend && GetTime() - pto->nLastSend > 30 * 60 && pto->vSendMsg.empty())
+                pto->fPingQueued = true;
+            // Refresh ping about every 2 minutes so the Debug Network tab stays current.
+            if (pto->nPingNonceSent == 0 &&
+                (pto->nPingUsecStart == 0 || (nNowUsec - pto->nPingUsecStart > 120LL * 1000000)))
+                pto->fPingQueued = true;
+        }
+        if (pto->fPingQueued) {
+            if (pto->nVersion > BIP0031_VERSION) {
+                uint64_t nonce = 0;
+                while ((nonce == 0) && (RAND_bytes((unsigned char*)&nonce, sizeof(nonce)) == 1))
+                    ; // retry until non-zero
+                pto->nPingNonceSent = nonce;
+                pto->nPingUsecStart = GetTimeMillis() * 1000;
                 pto->PushMessage("ping", nonce);
-            else
+            } else {
+                pto->nPingNonceSent = 0;
                 pto->PushMessage("ping");
+            }
+            pto->fPingQueued = false;
         }
 
         // Resend wallet transactions that haven't gotten in a block yet

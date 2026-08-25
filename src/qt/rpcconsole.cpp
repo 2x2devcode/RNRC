@@ -4,6 +4,10 @@
 #include "clientmodel.h"
 #include "bitcoinrpc.h"
 #include "guiutil.h"
+#include "peertablemodel.h"
+#include "bantablemodel.h"
+
+#include "util.h"
 
 #include <QTime>
 #include <QTimer>
@@ -12,6 +16,9 @@
 #include <QKeyEvent>
 #include <QUrl>
 #include <QScrollBar>
+#include <QHeaderView>
+#include <QShowEvent>
+#include <QHideEvent>
 
 #include <openssl/crypto.h>
 
@@ -188,6 +195,9 @@ void RPCExecutor::request(const QString &command)
 RPCConsole::RPCConsole(QWidget *parent) :
     QDialog(parent),
     ui(new Ui::RPCConsole),
+    clientModel(0),
+    peerModel(0),
+    banModel(0),
     historyPtr(0)
 {
     ui->setupUi(this);
@@ -265,13 +275,26 @@ void RPCConsole::setClientModel(ClientModel *model)
         // Provide initial values
         ui->clientVersion->setText(model->formatFullVersion());
         ui->clientName->setText(model->clientName());
-        ui->buildDate->setText(model->formatBuildDate());
+        ui->dataDir->setText(QString::fromStdString(GetDataDir().string()));
         ui->startupTime->setText(model->formatClientStartupTime());
 
         setNumConnections(model->getNumConnections());
         ui->isTestNet->setChecked(model->isTestNet());
 
         setNumBlocks(model->getNumBlocks(), model->getNumBlocksOfPeers());
+
+        // Network tab — connected peers + banned list
+        peerModel = new PeerTableModel(model);
+        ui->peerWidget->setModel(peerModel);
+        ui->peerWidget->horizontalHeader()->setResizeMode(PeerTableModel::NodeId,     QHeaderView::ResizeToContents);
+        ui->peerWidget->horizontalHeader()->setResizeMode(PeerTableModel::Address,   QHeaderView::Stretch);
+        ui->peerWidget->horizontalHeader()->setResizeMode(PeerTableModel::UserAgent, QHeaderView::ResizeToContents);
+        ui->peerWidget->horizontalHeader()->setResizeMode(PeerTableModel::Ping,      QHeaderView::ResizeToContents);
+
+        banModel = new BanTableModel(model);
+        ui->banlistWidget->setModel(banModel);
+        ui->banlistWidget->horizontalHeader()->setResizeMode(BanTableModel::Address,     QHeaderView::Stretch);
+        ui->banlistWidget->horizontalHeader()->setResizeMode(BanTableModel::BannedUntil, QHeaderView::ResizeToContents);
     }
 }
 
@@ -417,6 +440,13 @@ void RPCConsole::on_tabWidget_currentChanged(int index)
     {
         ui->lineEdit->setFocus();
     }
+    else if (ui->tabWidget->widget(index) == ui->tab_network)
+    {
+        if (peerModel)
+            peerModel->refresh();
+        if (banModel)
+            banModel->refresh();
+    }
 }
 
 void RPCConsole::on_openDebugLogfileButton_clicked()
@@ -434,4 +464,22 @@ void RPCConsole::on_showCLOptionsButton_clicked()
 {
     GUIUtil::HelpMessageBox help;
     help.exec();
+}
+
+void RPCConsole::showEvent(QShowEvent *event)
+{
+    QDialog::showEvent(event);
+    if (peerModel)
+        peerModel->startAutoRefresh();
+    if (banModel)
+        banModel->startAutoRefresh();
+}
+
+void RPCConsole::hideEvent(QHideEvent *event)
+{
+    QDialog::hideEvent(event);
+    if (peerModel)
+        peerModel->stopAutoRefresh();
+    if (banModel)
+        banModel->stopAutoRefresh();
 }

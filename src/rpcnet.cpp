@@ -51,11 +51,14 @@ Value getpeerinfo(const Array& params, bool fHelp)
     BOOST_FOREACH(const CNodeStats& stats, vstats) {
         Object obj;
 
+        obj.push_back(Pair("id", stats.nodeid));
         obj.push_back(Pair("addr", stats.addrName));
         obj.push_back(Pair("services", strprintf("%08"PRIx64, stats.nServices)));
         obj.push_back(Pair("lastsend", (int64_t)stats.nLastSend));
         obj.push_back(Pair("lastrecv", (int64_t)stats.nLastRecv));
         obj.push_back(Pair("conntime", (int64_t)stats.nTimeConnected));
+        if (stats.dPingTime >= 0.0)
+            obj.push_back(Pair("pingtime", stats.dPingTime));
         obj.push_back(Pair("version", stats.nVersion));
         obj.push_back(Pair("subver", stats.strSubVer));
         obj.push_back(Pair("inbound", stats.fInbound));
@@ -67,7 +70,56 @@ Value getpeerinfo(const Array& params, bool fHelp)
 
     return ret;
 }
- 
+
+Value addnode(const Array& params, bool fHelp)
+{
+    string strCommand;
+    if (params.size() == 2)
+        strCommand = params[1].get_str();
+    if (fHelp || params.size() != 2 ||
+        (strCommand != "onetry" && strCommand != "add" && strCommand != "remove"))
+        throw runtime_error(
+            "addnode \"node\" \"add|remove|onetry\"\n"
+            "\nAttempts add or remove a node from the addnode list.\n"
+            "Or try a connection to a node once.\n"
+            "\nArguments:\n"
+            "1. \"node\"     (string, required) The node (see getpeerinfo for nodes)\n"
+            "2. \"command\"  (string, required) 'add' to add a node to the list, 'remove' to remove a node from the list, 'onetry' to try a connection to the node once\n"
+            "\nExamples:\n"
+            "> RNRC-cli addnode \"192.168.0.6:18355\" \"onetry\"\n"
+            "> curl --user myusername --data-binary '{\"jsonrpc\": \"1.0\", \"id\":\"curltest\", \"method\": \"addnode\", \"params\": [\"192.168.0.6:18355\", \"onetry\"] }' -H 'content-type: text/plain;' http://127.0.0.1:18332/\n");
+
+    string strNode = params[0].get_str();
+
+    if (strCommand == "onetry")
+    {
+        CAddress addr;
+        OpenNetworkConnection(addr, NULL, strNode.c_str(), true);
+        return Value::null;
+    }
+
+    LOCK(cs_vAddedNodes);
+    vector<string>::iterator it = vAddedNodes.begin();
+    for (; it != vAddedNodes.end(); it++)
+        if (strNode == *it)
+            break;
+
+    if (strCommand == "add")
+    {
+        if (it != vAddedNodes.end())
+            throw JSONRPCError(RPC_CLIENT_NODE_ALREADY_ADDED, "Error: Node already added");
+        vAddedNodes.push_back(strNode);
+    }
+    else if (strCommand == "remove")
+    {
+        if (it == vAddedNodes.end())
+            throw JSONRPCError(RPC_CLIENT_NODE_NOT_ADDED, "Error: Node has not been added.");
+        vAddedNodes.erase(it);
+    }
+
+    return Value::null;
+}
+
 // ppcoin: send alert.  
 // There is a known deadlock situation with ThreadMessageHandler
 // ThreadMessageHandler: holds cs_vSend and acquiring cs_main in SendMessages()

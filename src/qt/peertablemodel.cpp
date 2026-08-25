@@ -28,13 +28,10 @@ PeerTableModel::PeerTableModel(ClientModel *parent)
       timer(0),
       fRefreshing(false)
 {
-    columns << tr("Address")
+    columns << tr("NodeId")
+            << tr("Node/Service")
             << tr("User Agent")
-            << tr("Version")
-            << tr("Direction")
-            << tr("Connected")
-            << tr("Start Block")
-            << tr("Ban Score");
+            << tr("Ping Time");
 
     timer = new QTimer(this);
     connect(timer, SIGNAL(timeout()), this, SLOT(refresh()));
@@ -43,7 +40,6 @@ PeerTableModel::PeerTableModel(ClientModel *parent)
 
 PeerTableModel::~PeerTableModel()
 {
-    // timer is a child of this — auto-deleted
 }
 
 void PeerTableModel::startAutoRefresh()
@@ -59,11 +55,8 @@ void PeerTableModel::stopAutoRefresh()
 
 void PeerTableModel::refresh()
 {
-    // Nested refresh (e.g. timer during a blocking GUI path) must not
-    // re-enter beginResetModel — that crashes Qt views on Windows.
     if (fRefreshing)
         return;
-    // Skip model resets while catching up; NetworkPage still updates labels.
     if (clientModel && clientModel->inInitialBlockDownload())
         return;
     fRefreshing = true;
@@ -101,33 +94,20 @@ QVariant PeerTableModel::data(const QModelIndex &index, int role) const
 
     switch (index.column())
     {
+    case NodeId:
+        return s.nodeid;
+
     case Address:
         return QString::fromStdString(s.addrName);
 
     case UserAgent:
         return QString::fromStdString(s.strSubVer);
 
-    case Version:
-        return QString::number(s.nVersion);
-
-    case Direction:
-        return s.fInbound ? tr("Inbound") : tr("Outbound");
-
-    case Connected:
-    {
-        int64_t secs = GetTime() - s.nTimeConnected;
-        if (secs < 60)
-            return tr("%1 sec").arg(secs);
-        if (secs < 3600)
-            return tr("%1 min").arg(secs / 60);
-        return tr("%1 h").arg(secs / 3600);
-    }
-
-    case StartHeight:
-        return s.nStartingHeight;
-
-    case BanScore:
-        return s.nMisbehavior;
+    case Ping:
+        if (s.dPingTime < 0.0)
+            return tr("N/A");
+        // Show milliseconds for readability
+        return tr("%1 ms").arg(QString::number(s.dPingTime * 1000.0, 'f', 1));
     }
     return QVariant();
 }
