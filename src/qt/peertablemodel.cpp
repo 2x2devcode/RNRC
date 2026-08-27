@@ -31,7 +31,7 @@ PeerTableModel::PeerTableModel(ClientModel *parent)
 {
     columns << tr("NodeId")
             << tr("Node/Service")
-            << tr("User Agent")
+            << tr("Version")
             << tr("Ping Time");
 
     timer = new QTimer(this);
@@ -142,4 +142,14 @@ const CNodeStats *PeerTableModel::nodeStats(int row) const
     if (row < 0 || row >= (int)peers.size())
         return NULL;
     return &peers[row];
+}
+
+int PeerTableModel::getRowByNodeId(int nodeid) const
+{
+    for (int i = 0; i < (int)peers.size(); ++i)
+    {
+        if (peers[i].nodeid == nodeid)
+            return i;
+    }
+    return -1;
 }

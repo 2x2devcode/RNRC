@@ -20,6 +20,7 @@
 #include <QTranslator>
 #include <QSplashScreen>
 #include <QLibraryInfo>
+#include <QProcess>
 
 #if defined(BITCOIN_NEED_QT_PLUGINS) && !defined(_BITCOIN_QT_PLUGINS_INCLUDED)
 #define _BITCOIN_QT_PLUGINS_INCLUDED
@@ -267,6 +268,12 @@ int main(int argc, char *argv[])
             }
             // Shutdown the core and its threads, but don't exit Bitcoin-Qt here
             Shutdown(NULL);
+
+            // Wallet-repair restart: relaunch with the requested args after a clean exit
+            if (window.isRestartRequested())
+            {
+                QProcess::startDetached(QApplication::applicationFilePath(), window.getRestartArgs());
+            }
         }
         else
         {

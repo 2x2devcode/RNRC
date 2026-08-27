@@ -116,3 +116,8 @@ Qt::ItemFlags BanTableModel::flags(const QModelIndex &index) const
         return Qt::NoItemFlags;
     return Qt::ItemIsSelectable | Qt::ItemIsEnabled;
 }
+
+bool BanTableModel::shouldShow() const
+{
+    return !bans.empty();
+}

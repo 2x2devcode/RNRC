@@ -530,6 +530,28 @@ DBErrors CWalletDB::LoadWallet(CWallet* pwallet)
     return result;
 }
 
+DBErrors CWalletDB::ZapWalletTx(CWallet* pwallet, std::vector<CWalletTx>& vWtx)
+{
+    vWtx.clear();
+
+    // Copy wallet txs then erase them from DB and memory
+    for (std::map<uint256, CWalletTx>::iterator it = pwallet->mapWallet.begin();
+         it != pwallet->mapWallet.end(); ++it)
+    {
+        vWtx.push_back(it->second);
+    }
+
+    BOOST_FOREACH(const CWalletTx& wtx, vWtx)
+    {
+        uint256 hash = wtx.GetHash();
+        if (!EraseTx(hash))
+            return DB_CORRUPT;
+        pwallet->mapWallet.erase(hash);
+    }
+
+    return DB_LOAD_OK;
+}
+
 void ThreadFlushWalletDB(void* parg)
 {
     // Make this thread recognisable as the wallet flushing thread

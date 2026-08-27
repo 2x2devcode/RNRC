@@ -701,9 +701,20 @@ public:
     static bool IsBanned(CNetAddr ip);
     /** Copy current ban map (addr -> banned-until unix time). */
     static void GetBanned(std::map<CNetAddr, int64_t>& banMap);
+    /** Ban until absolute unix time (or extend if already banned longer). */
+    static void SetBanned(const CNetAddr& addr, int64_t banUntil);
+    /** Remove addr from ban map; returns true if it was present. */
+    static bool RemoveBanned(const CNetAddr& addr);
     bool Misbehaving(int howmuch); // 1 == a little, 100 == a lot
     void copyStats(CNodeStats &stats);
 };
+
+/** Disconnect peer by node id (sets fDisconnect / CloseSocketDisconnect). */
+bool DisconnectNode(int nodeid);
+/** Ban address for banTimeSeconds from now and disconnect matching peers. */
+void Ban(const CNetAddr& addr, int64_t banTimeSeconds);
+/** Unban address; returns true if a ban entry was removed. */
+bool Unban(const CNetAddr& addr);
 
 inline void RelayInventory(const CInv& inv)
 {
