@@ -27,7 +27,7 @@ public:
     enum ColumnIndex {
         NodeId      = 0,
         Address     = 1,
-        UserAgent   = 2,
+        UserAgent   = 2, // displayed as "Version" (strSubVer)
         Ping        = 3,
         NumColumns  = 4
     };
@@ -43,6 +43,8 @@ public:
     Qt::ItemFlags flags(const QModelIndex &index) const;
 
     const CNodeStats *nodeStats(int row) const;
+    /** Return row for node id, or -1 if not present. */
+    int getRowByNodeId(int nodeid) const;
 
     /**
      * When true, refresh while IBD is in progress (Debug Network tab).

@@ -11,6 +11,8 @@
 class CKeyPool;
 class CAccount;
 class CAccountingEntry;
+class CWallet;
+class CWalletTx;
 
 /** Error statuses for the wallet database */
 enum DBErrors
@@ -178,6 +180,7 @@ public:
 
     DBErrors ReorderTransactions(CWallet*);
     DBErrors LoadWallet(CWallet* pwallet);
+    DBErrors ZapWalletTx(CWallet* pwallet, std::vector<CWalletTx>& vWtx);
     static bool Recover(CDBEnv& dbenv, std::string filename, bool fOnlyKeys);
     static bool Recover(CDBEnv& dbenv, std::string filename);
 };

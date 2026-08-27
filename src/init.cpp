@@ -301,6 +301,10 @@ std::string HelpMessage()
         "  -keypool=<n>           " + _("Set key pool size to <n> (default: 100)") + "\n" +
         "  -rescan                " + _("Rescan the block chain for missing wallet transactions") + "\n" +
         "  -salvagewallet         " + _("Attempt to recover private keys from a corrupt wallet.dat") + "\n" +
+        "  -zapwallettxes=<mode>  " + _("Delete all wallet transactions and only recover those parts of the blockchain through -rescan on startup") + "\n" +
+        "                         " + _("(1 = keep tx meta data e.g. account owner and payment request information, 2 = drop tx meta data)") + "\n" +
+        "  -reindex               " + _("Rebuild block chain index from current blk000??.dat files on startup") + "\n" +
+        "  -resync                " + _("Delete local blockchain folders and resync from scratch on startup") + "\n" +
         "  -checkblocks=<n>       " + _("How many blocks to check at startup (default: 2500, 0 = all)") + "\n" +
         "  -checklevel=<n>        " + _("How thorough the block verification is (0-6, default: 1)") + "\n" +
         "  -loadblock=<file>      " + _("Imports blocks from external blk000?.dat file") + "\n" +
@@ -438,6 +442,11 @@ bool AppInit2()
 
     if (GetBoolArg("-salvagewallet")) {
         // Rewrite just private keys: rescan to find transactions
+        SoftSetBoolArg("-rescan", true);
+    }
+
+    // -zapwallettxes implies a rescan
+    if (GetBoolArg("-zapwallettxes", false)) {
         SoftSetBoolArg("-rescan", true);
     }
 
@@ -716,6 +725,35 @@ bool AppInit2()
         return InitError(msg);
     }
 
+    // -resync: wipe block index + blk files and force wallet rescan after re-download
+    if (GetBoolArg("-resync", false))
+    {
+        uiInterface.InitMessage(_("Preparing for resync..."));
+        printf("-resync: removing local blockchain data\n");
+        boost::filesystem::path pathTxLevelDB = GetDataDir() / "txleveldb";
+        if (boost::filesystem::exists(pathTxLevelDB))
+            boost::filesystem::remove_all(pathTxLevelDB);
+        unsigned int nFile = 1;
+        while (true)
+        {
+            boost::filesystem::path pathBlockFile = GetDataDir() / strprintf("blk%04u.dat", nFile);
+            if (!boost::filesystem::exists(pathBlockFile))
+                break;
+            boost::filesystem::remove(pathBlockFile);
+            nFile++;
+        }
+        SoftSetBoolArg("-rescan", true);
+    }
+    // -reindex: wipe block index only; blk files kept and re-imported below
+    else if (GetBoolArg("-reindex", false))
+    {
+        uiInterface.InitMessage(_("Reindexing block chain..."));
+        printf("-reindex: removing txleveldb\n");
+        boost::filesystem::path pathTxLevelDB = GetDataDir() / "txleveldb";
+        if (boost::filesystem::exists(pathTxLevelDB))
+            boost::filesystem::remove_all(pathTxLevelDB);
+    }
+
     if (GetBoolArg("-loadblockindextest"))
     {
         CTxDB txdb("r");
@@ -740,6 +778,23 @@ bool AppInit2()
         return false;
     }
     printf(" block index %15"PRId64"ms\n", GetTimeMillis() - nStart);
+
+    // Rebuild index from existing blk*.dat files after wiping txleveldb
+    if (GetBoolArg("-reindex", false) && !GetBoolArg("-resync", false))
+    {
+        uiInterface.InitMessage(_("Reindexing block files..."));
+        int nFile = 1;
+        while (true)
+        {
+            FILE* file = OpenBlockFile(nFile, 0, "rb");
+            if (!file)
+                break;
+            printf("Reindexing block file blk%04u.dat...\n", (unsigned int)nFile);
+            LoadExternalBlockFile(file);
+            nFile++;
+        }
+        printf("Reindexing finished\n");
+    }
 
     if (GetBoolArg("-printblockindex") || GetBoolArg("-printblocktree"))
     {
@@ -810,6 +865,23 @@ bool AppInit2()
             strErrors << _("Error loading wallet.dat") << "\n";
     }
 
+    // needed to restore wallet transaction meta data after -zapwallettxes
+    std::vector<CWalletTx> vWtx;
+
+    if (GetBoolArg("-zapwallettxes", false))
+    {
+        uiInterface.InitMessage(_("Zapping all transactions from wallet..."));
+        printf("Zapping all transactions from wallet...\n");
+        CWalletDB walletdb(strWalletFileName);
+        DBErrors nZapWalletRet = walletdb.ZapWalletTx(pwalletMain, vWtx);
+        if (nZapWalletRet != DB_LOAD_OK)
+        {
+            strErrors << _("Error loading wallet.dat: Wallet corrupted") << "\n";
+            printf("%s", strErrors.str().c_str());
+            return InitError(strErrors.str());
+        }
+    }
+
     if (GetBoolArg("-upgradewallet", fFirstRun))
     {
         int nMaxVersion = GetArg("-upgradewallet", 0);
@@ -861,6 +933,30 @@ bool AppInit2()
         nStart = GetTimeMillis();
         pwalletMain->ScanForWalletTransactions(pindexRescan, true);
         printf(" rescan      %15"PRId64"ms\n", GetTimeMillis() - nStart);
+
+        // Restore wallet transaction metadata after -zapwallettxes=1
+        if (GetBoolArg("-zapwallettxes", false) && GetArg("-zapwallettxes", "1") != "2")
+        {
+            CWalletDB walletdb(strWalletFileName);
+            BOOST_FOREACH(const CWalletTx& wtxOld, vWtx)
+            {
+                uint256 hash = wtxOld.GetHash();
+                std::map<uint256, CWalletTx>::iterator mi = pwalletMain->mapWallet.find(hash);
+                if (mi != pwalletMain->mapWallet.end())
+                {
+                    const CWalletTx* copyFrom = &wtxOld;
+                    CWalletTx* copyTo = &mi->second;
+                    copyTo->mapValue = copyFrom->mapValue;
+                    copyTo->vOrderForm = copyFrom->vOrderForm;
+                    copyTo->nTimeReceived = copyFrom->nTimeReceived;
+                    copyTo->nTimeSmart = copyFrom->nTimeSmart;
+                    copyTo->fFromMe = copyFrom->fFromMe;
+                    copyTo->strFromAccount = copyFrom->strFromAccount;
+                    copyTo->nOrderPos = copyFrom->nOrderPos;
+                    copyTo->WriteToDisk();
+                }
+            }
+        }
     }
 
     // ********************************************************* Step 9: import blocks

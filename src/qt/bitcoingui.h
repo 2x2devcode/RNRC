@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <QSystemTrayIcon>
+#include <QStringList>
 
 #include <stdint.h>
 
@@ -49,6 +50,11 @@ public:
         functionality.
     */
     void setWalletModel(WalletModel *walletModel);
+
+    /** True if a wallet-repair restart was requested. */
+    bool isRestartRequested() const { return !restartArgs.isEmpty(); }
+    /** Command-line args for the restart (without application path). */
+    QStringList getRestartArgs() const { return restartArgs; }
 
 protected:
     void changeEvent(QEvent *e);
@@ -107,6 +113,7 @@ private:
     QMovie *syncIconMovie;
 
     uint64_t nWeight;
+    QStringList restartArgs;
 
     /** Create the main UI actions. */
     void createActions();
@@ -156,6 +163,9 @@ private slots:
     void gotoNetworkPage();
     /** Attach Network tab model after IBD settles (avoids Windows AV during first PoS). */
     void tryAttachNetworkPage();
+
+    /** Restart client after wallet repair (stores args and requests shutdown). */
+    void handleRestart(QStringList args);
 
     /** Show Sign/Verify Message dialog and switch to sign message tab */
     void gotoSignMessageTab(QString addr = "");

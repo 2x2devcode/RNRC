@@ -45,6 +45,9 @@ public:
                         int role = Qt::DisplayRole) const;
     Qt::ItemFlags flags(const QModelIndex &index) const;
 
+    /** True when there is at least one active ban to show. */
+    bool shouldShow() const;
+
     void startAutoRefresh();
     void stopAutoRefresh();
 

@@ -585,6 +585,53 @@ void CNode::GetBanned(std::map<CNetAddr, int64_t>& banMap)
     banMap = setBanned;
 }
 
+void CNode::SetBanned(const CNetAddr& addr, int64_t banUntil)
+{
+    LOCK(cs_setBanned);
+    if (setBanned[addr] < banUntil)
+        setBanned[addr] = banUntil;
+}
+
+bool CNode::RemoveBanned(const CNetAddr& addr)
+{
+    LOCK(cs_setBanned);
+    return setBanned.erase(addr) > 0;
+}
+
+bool DisconnectNode(int nodeid)
+{
+    LOCK(cs_vNodes);
+    BOOST_FOREACH(CNode* pnode, vNodes)
+    {
+        if (pnode->id == nodeid)
+        {
+            pnode->fDisconnect = true;
+            pnode->CloseSocketDisconnect();
+            return true;
+        }
+    }
+    return false;
+}
+
+void Ban(const CNetAddr& addr, int64_t banTimeSeconds)
+{
+    CNode::SetBanned(addr, GetTime() + banTimeSeconds);
+    LOCK(cs_vNodes);
+    BOOST_FOREACH(CNode* pnode, vNodes)
+    {
+        if ((CNetAddr)pnode->addr == addr)
+        {
+            pnode->fDisconnect = true;
+            pnode->CloseSocketDisconnect();
+        }
+    }
+}
+
+bool Unban(const CNetAddr& addr)
+{
+    return CNode::RemoveBanned(addr);
+}
+
 bool CNode::Misbehaving(int howmuch)
 {
     if (addr.IsLocal())
